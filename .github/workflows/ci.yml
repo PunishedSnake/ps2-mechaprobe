@@ -13,21 +13,33 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Verify FMCB 1.966 reference KELF requests ICVPS2
+      - name: Scan FreeMcBoot 1.966 KELF templates for ICVPS2
         run: |
           python3 - <<'PY'
+          import json
           import struct
           import urllib.request
 
-          url = "https://raw.githubusercontent.com/israpps/FreeMcBoot-Installer/master/installer_res/1966/INSTALL/SYSTEM/FMCB.XLF"
-          data = urllib.request.urlopen(url, timeout=30).read()
-          if len(data) < 0x20:
-              raise SystemExit("FMCB.XLF is too small to contain a KELF header")
-          elf_size, header_size, unknown5, flags, bit_count, mg_zones = struct.unpack_from("<IHHHHI", data, 0x10)
-          print(f"FMCB.XLF bytes={len(data)} elf_size={elf_size} header_size={header_size} flags=0x{flags:04x} bit_count={bit_count} mg_zones=0x{mg_zones:08x}")
-          print(f"Uses_ICVPS2={(flags >> 1) & 1}")
-          if ((flags >> 1) & 1) != 1:
-              raise SystemExit("Reference FMCB.XLF does not request ICVPS2")
+          api = "https://api.github.com/repos/israpps/FreeMcBoot-Installer/contents/installer_res/1966/INSTALL/SYSTEM?ref=master"
+          req = urllib.request.Request(api, headers={"User-Agent": "ps2-mechaprobe-ci"})
+          entries = json.load(urllib.request.urlopen(req, timeout=30))
+          found = []
+          for entry in entries:
+              name = entry["name"]
+              if not name.upper().endswith((".XLF", ".XRX")):
+                  continue
+              data = urllib.request.urlopen(entry["download_url"], timeout=30).read()
+              if len(data) < 0x20:
+                  print(f"{name:14} too-small bytes={len(data)}")
+                  continue
+              elf_size, header_size, unknown5, flags, bit_count, mg_zones = struct.unpack_from("<IHHHHI", data, 0x10)
+              uses = (flags >> 1) & 1
+              print(f"{name:14} bytes={len(data):7} header={header_size:4} flags=0x{flags:04x} bit_count={bit_count:2} Uses_ICVPS2={uses}")
+              if uses:
+                  found.append(name)
+          print("ICVPS2 candidates:", ", ".join(found) if found else "NONE")
+          if not found:
+              raise SystemExit("No top-level FreeMcBoot 1.966 KELF template requests ICVPS2")
           PY
       - name: Build stripped PS2 ELF with PS2DEV v2.0.0
         run: >-
