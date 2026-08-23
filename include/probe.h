@@ -3,7 +3,7 @@
 
 #define PROBE_INPUT_PATH "mass:/PS2DF-MECHA/input.kelf"
 #define PROBE_ROOT_PATH "mass:/PS2DF-MECHA"
-#define PROBE_VERSION "0.1.0-dev"
+#define PROBE_VERSION "0.1.0-dev.2"
 
 typedef struct {
     char romver[32];
@@ -28,9 +28,11 @@ typedef struct {
     char sha256[65];
     unsigned int input_size;
     unsigned int header_size;
+    unsigned int original_flags;
     unsigned int flags;
     unsigned int bit_count;
     int uses_icvps2;
+    int icvps2_flag_forced;
     unsigned int returned_header_size;
     unsigned int returned_block_count;
     unsigned int processed_encrypted_blocks;
@@ -43,6 +45,6 @@ typedef struct {
 
 void probe_collect_system_info(probe_system_info_t *info);
 int probe_wait_for_mass(unsigned int timeout_ms);
-int probe_run(int memory_card_port, probe_result_t *result);
+int probe_run(int memory_card_port, int force_icvps2, probe_result_t *result);
 
 #endif
