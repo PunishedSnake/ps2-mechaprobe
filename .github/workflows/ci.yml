@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  ps2-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build stripped PS2 ELF with PS2DEV v2.0.0
+        run: >-
+          docker run --rm -v "$PWD:/work" -w /work ps2dev/ps2dev:v2.0.0
+          sh -c 'apk add --no-cache make >/dev/null && make clean && make release'
+      - name: Record artifact checksum
+        run: sha256sum PS2_MECHAPROBE.ELF | tee PS2_MECHAPROBE.ELF.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PS2-MechaProbe
+          path: |
+            PS2_MECHAPROBE.ELF
+            PS2_MECHAPROBE.ELF.sha256
+            README.md
