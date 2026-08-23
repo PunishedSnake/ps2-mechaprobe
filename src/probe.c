@@ -16,6 +16,7 @@
 #define PROBE_MAX_KELF_SIZE (16u * 1024u * 1024u)
 #define PROBE_RPC_READ_PADDING 0x1000u
 #define PROBE_PATH_SIZE 192u
+#define KELF_FLAG_USES_ICVPS2 0x0002u
 
 static const char *region_names[8] = {
     "Japan", "USA", "Europe", "Oceania",
@@ -345,7 +346,7 @@ static int save_final_evidence(const probe_result_t *result,
         "  \"console\": {\"romver\": \"%s\", \"model\": \"%s\", \"model_query_result\": %d, \"model_status\": \"0x%08x\"},\n"
         "  \"mechacon\": {\"mv_result\": %d, \"mv_status\": \"0x%08x\", \"raw\": \"%s\", \"region\": \"%s\", \"version\": \"%s\", \"system_type\": \"%s\"},\n"
         "  \"rtc\": \"%s\",\n"
-        "  \"kelf\": {\"flags\": \"0x%04x\", \"header_size\": %u, \"bit_count\": %u, \"uses_icvps2\": %s},\n"
+        "  \"kelf\": {\"original_flags\": \"0x%04x\", \"effective_flags\": \"0x%04x\", \"icvps2_flag_forced\": %s, \"header_size\": %u, \"bit_count\": %u, \"uses_icvps2\": %s},\n"
         "  \"transaction\": {\"returned_header_size\": %u, \"returned_block_count\": %u, \"processed_encrypted_blocks\": %u},\n"
         "  \"icvps2\": %s,\n"
         "  \"evidence_write_result\": %d\n"
@@ -358,8 +359,10 @@ static int save_final_evidence(const probe_result_t *result,
         result->system.mv_result, result->system.mv_status,
         result->system.mv_raw_hex, result->system.mg_region,
         result->system.mechacon_version, result->system.system_type,
-        result->system.rtc, result->flags, result->header_size,
-        result->bit_count, result->uses_icvps2 ? "true" : "false",
+        result->system.rtc, result->original_flags, result->flags,
+        result->icvps2_flag_forced ? "true" : "false",
+        result->header_size, result->bit_count,
+        result->uses_icvps2 ? "true" : "false",
         result->returned_header_size, result->returned_block_count,
         result->processed_encrypted_blocks, icv_json, first_error);
 
@@ -490,6 +493,10 @@ int probe_run(int memory_card_port, probe_result_t *result)
         snprintf(result->stage, sizeof(result->stage), "create evidence directory");
         return result->code;
     }
+
+    /* Save the exact caller-supplied KELF before any experimental mutation.
+       The SHA-256 above and input.kelf therefore identify the immutable control
+       input even when this build enables ICVPS2 only in its private RAM copy. */
     result->evidence_result = save_initial_evidence(result, buffer, size);
 
     code = kelf_preflight(buffer, size, result, &key_offset);
@@ -499,6 +506,27 @@ int probe_run(int memory_card_port, probe_result_t *result)
         result->evidence_result = save_final_evidence(result, buffer, NULL, 0);
         free(buffer);
         return result->code;
+    }
+
+    result->original_flags = result->flags;
+    if (!result->uses_icvps2) {
+        SecrKELFHeader_t *header = (SecrKELFHeader_t *)buffer;
+
+        header->flags |= KELF_FLAG_USES_ICVPS2;
+        result->icvps2_flag_forced = 1;
+
+        /* Re-run layout validation after changing the semantic header bit.
+           This also proves that the template reserves enough header space for
+           the additional eight-byte ICVPS2 field before MechaCon sees it. */
+        code = kelf_preflight(buffer, size, result, &key_offset);
+        if (code < 0) {
+            result->code = code;
+            snprintf(result->stage, sizeof(result->stage),
+                     "forced ICVPS2 preflight");
+            result->evidence_result = save_final_evidence(result, buffer, NULL, 0);
+            free(buffer);
+            return result->code;
+        }
     }
 
     memset(&bit_table, 0, sizeof(bit_table));
