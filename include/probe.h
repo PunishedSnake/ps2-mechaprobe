@@ -22,6 +22,7 @@ typedef struct {
 
 typedef struct {
     int code;
+    int memory_card_port;
     char stage[48];
     char run_dir[96];
     char sha256[65];
