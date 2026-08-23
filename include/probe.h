@@ -45,6 +45,6 @@ typedef struct {
 
 void probe_collect_system_info(probe_system_info_t *info);
 int probe_wait_for_mass(unsigned int timeout_ms);
-int probe_run(int memory_card_port, int force_icvps2, probe_result_t *result);
+int probe_run(int memory_card_port, probe_result_t *result);
 
 #endif
