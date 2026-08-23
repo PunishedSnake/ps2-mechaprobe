@@ -352,7 +352,7 @@ static int save_final_evidence(const probe_result_t *result,
         "}\n",
         PROBE_VERSION, status, result->stage, result->code,
         PROBE_INPUT_PATH, result->input_size, result->sha256,
-        result->run_dir[0] != '\0' ? (strstr(result->run_dir, "RUN") != NULL ? 0 : 0) : 0,
+        result->memory_card_port,
         result->system.romver, result->system.model,
         result->system.model_result, result->system.model_status,
         result->system.mv_result, result->system.mv_status,
@@ -363,9 +363,6 @@ static int save_final_evidence(const probe_result_t *result,
         result->returned_header_size, result->returned_block_count,
         result->processed_encrypted_blocks, icv_json, first_error);
 
-    /* The memory-card port is fixed by the caller but save_final_evidence does
-       not receive it. Replace the placeholder with a field stored in the run
-       name would be brittle, so the caller patches JSON generation below. */
     if (written < 0 || (unsigned int)written >= sizeof(json))
         return first_error != 0 ? first_error : -130;
 
@@ -466,6 +463,7 @@ int probe_run(int memory_card_port, probe_result_t *result)
     if (result == NULL || (memory_card_port != 0 && memory_card_port != 1))
         return -1;
     memset(result, 0, sizeof(*result));
+    result->memory_card_port = memory_card_port;
     snprintf(result->stage, sizeof(result->stage), "initializing");
     probe_collect_system_info(&result->system);
 
