@@ -19,6 +19,7 @@
 #define UI_WARNING     0x0048b0e6u
 #define UI_DANGER      0x005c5ce6u
 #define UI_DISABLED    0x005a5149u
+#define UI_MENU_VISIBLE_ITEMS 5u
 
 static u32 tone_color(int tone)
 {
@@ -120,11 +121,29 @@ static void render_menu(const char *title, const char *status,
                         const ui_menu_item_t *items, unsigned int item_count,
                         unsigned int selected)
 {
+    unsigned int first = 0;
+    unsigned int visible_count;
     unsigned int i;
+    unsigned int row = 0;
     unsigned int y = 9;
+    char page[80];
+
+    if (item_count > UI_MENU_VISIBLE_ITEMS) {
+        if (selected >= UI_MENU_VISIBLE_ITEMS)
+            first = selected - UI_MENU_VISIBLE_ITEMS + 1u;
+        if (first + UI_MENU_VISIBLE_ITEMS > item_count)
+            first = item_count - UI_MENU_VISIBLE_ITEMS;
+    }
+
+    visible_count = item_count - first;
+    if (visible_count > UI_MENU_VISIBLE_ITEMS)
+        visible_count = UI_MENU_VISIBLE_ITEMS;
 
     shell("PROBE", title, status, UI_TONE_INFO);
-    for (i = 0; i < item_count && y + 1 < 36; i++, y += 4) {
+    for (i = 8; i <= 34; i++)
+        clear_line(i, UI_BG);
+
+    for (i = first; i < first + visible_count; i++, row++, y += 4) {
         int is_selected = i == selected;
         u32 background = is_selected ? UI_PANEL_ALT : UI_PANEL;
         u32 label_color = items[i].enabled ? UI_TEXT : UI_DISABLED;
@@ -139,6 +158,14 @@ static void render_menu(const char *title, const char *status,
                    items[i].enabled ? UI_MUTED : UI_DISABLED,
                    items[i].hint != NULL ? items[i].hint : "");
         clear_line(y + 2, UI_BG);
+    }
+
+    if (item_count > UI_MENU_VISIBLE_ITEMS) {
+        snprintf(page, sizeof(page), "%s  items %u-%u of %u  %s",
+                 first > 0 ? "UP more" : "       ",
+                 first + 1u, first + visible_count, item_count,
+                 first + visible_count < item_count ? "DOWN more" : "");
+        print_line(3, 30, UI_BG, UI_MUTED, page);
     }
 
     clear_line(36, UI_PANEL_ALT);
