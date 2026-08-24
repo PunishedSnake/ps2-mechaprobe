@@ -1,6 +1,6 @@
 # ICVPS2 signed-KELF experiment
 
-This note records the first controlled attempt to produce an input KELF that genuinely declares `Uses_ICVPS2`, rather than changing the flag after signing.
+This note records the controlled reconstruction and hardware validation of a KELF that genuinely declares `Uses_ICVPS2`, rather than changing the flag after signing.
 
 ## Hardware baseline
 
@@ -40,7 +40,26 @@ Candidate A SHA-256:
 
 `e317a0a287939a93961a376f0bd3ed47e051029ee2e45f1fc17ca8db5f22d27a`
 
-This is the preferred first hardware test. It is still an experimental reconstruction until MechaCon accepts the header and returns ICVPS2.
+## Hardware validation result
+
+Candidate A is accepted by retail hardware. Multiple cold-boot runs completed the full native path:
+
+`SecrDownloadHeader -> encrypted block -> SecrDownloadGetKbit -> SecrDownloadGetKc -> SecrDownloadGetICVPS2 -> complete`
+
+The returned BIT reports header size `0x88`, matching the reconstructed layout. `SecrDownloadGetICVPS2()` succeeds and returns eight bytes which are stored in the explicit `0x80..0x87` slot.
+
+Nine controlled runs were completed with three MagicGate-capable cards: two Sony 8 MB cards and one unbranded 64 MB card. All nine runs completed successfully with the exact same Candidate A input.
+
+Observed behavior:
+
+- final Kbit/Kc are stable across repeated cold boots with the same physical card;
+- final Kbit/Kc differ between the tested physical cards;
+- ICVPS2 changes between transactions even when the physical card and KELF bytes remain unchanged;
+- all nine captured ICVPS2 values were distinct.
+
+The current evidence therefore rules out ICVPS2 being merely a fixed KELF hash or fixed card identifier. It is consistent with additional transaction/session state inside the MechaCon path. More instrumentation is required before attributing that changing state to a specific nonce/challenge.
+
+Exact per-card cryptographic outputs are intentionally kept in the local evidence bundles rather than committed to the public repository.
 
 ## Candidate B: root-slot reuse
 
@@ -50,30 +69,22 @@ Candidate B SHA-256:
 
 `b7f2d4af14c10ce75a499172fe04d587b73a6157330f2e2630fdb3d22702381d`
 
-Do not mix Candidate A and Candidate B in the same baseline session. Candidate B is only useful if Candidate A is rejected and its failure evidence has first been inspected.
+Candidate B is no longer required for the primary format hypothesis because Candidate A has been accepted by hardware. Keep it only as historical evidence of the alternative layout considered before validation.
 
-## First test protocol
+## Port-dependence protocol
 
-Use the already hardware-validated dev.5 probe without changing its code. Put Candidate A at `mass:/PS2DF-MECHA/input.kelf`, cold boot, use the same known-good MagicGate card as the successful native control, and select `Native control - mc0`.
+Dev.6 adds `Native control - mc1` and fixes menu visibility with a scrolling window. This permits a clean port comparison without using the unconditional-ICV mode.
 
-Because the input itself has `Uses_ICVPS2 = 1`, native-control mode follows the normal staged path and performs exactly one ICV read after successful Header -> Blocks -> Kbit -> Kc. Do not use the legacy unconditional-ICV mode for this experiment.
+For the port test:
 
-Possible results are intentionally distinguishable:
-
-- `SecrDownloadHeader` failure: the reconstructed ICV-enabled header/layout is not accepted.
-- returned BIT header size differs from `0x88`: important evidence about the authentic layout.
-- Kbit/Kc succeeds but ICV fails: the flag/layout is accepted but another semantic field is required.
-- complete + `icvps2.bin`: first successful ICVPS2 capture.
-
-## Card-dependence protocol after first success
-
-Keep the exact same Candidate A bytes for every comparison. Cold boot between every run.
-
-1. Known-good Card A, three runs.
-2. Card B, two or three runs.
-3. Card C, two or three runs.
-4. Optionally repeat one card in physical port 2 using the mc1 path.
-
-Record which `RUNxxxx` belongs to each physical card. Compare processed Kbit, Kc and ICVPS2 separately. This can distinguish card-dependent key wrapping from the actual ICVPS2 dependency.
+1. Keep Candidate A byte-identical.
+2. Use one already-characterized card.
+3. Cold boot and run `Native control - mc0`.
+4. Cold boot again, move the same card to mc1, and run `Native control - mc1`.
+5. Compare final Kbit, Kc and ICVPS2 separately.
 
 No MechaCon NVRAM/EEPROM writes are part of this protocol.
+
+## Historical note
+
+Older FreeMcBoot code already contains a direct SCMD `0x98` ICVPS2 read path and describes the result as eight bytes, but its source comments state that no known encrypted file used the field at the time. Current PS2SDK preserves the same operation. The present experiment therefore does not claim discovery of the command itself; its contribution is a reproducible ICV-enabled KELF layout and controlled retail-hardware captures.
