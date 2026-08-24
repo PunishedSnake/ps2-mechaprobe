@@ -2,6 +2,7 @@
 #include <fileXio_rpc.h>
 #include <kernel.h>
 #include <libcdvd.h>
+#include <libmc.h>
 #include <libsecr.h>
 
 #include <stdio.h>
@@ -124,14 +125,14 @@ static void run_probe(int memory_card_port, probe_mode_t mode)
 static void show_experiment_notes(void)
 {
     ui_message(
-        "Experiment protocol", "dev.3 separates the variables instead of bullying MechaCon",
+        "Experiment protocol", "dev.4 restores the missing EE memory-card initialization",
+        "RUN0002/RUN0003 proved the native 0x022c header and encrypted block pass,\n"
+        "but both failed at SecrDownloadGetKbit. FreeMcBoot initializes libmc with\n"
+        "mcInit(MC_TYPE_XMC) before signing; dev.3 did not.\n\n"
         "A. Native control: untouched KELF, normal libsecr behavior.\n"
         "B. Native + one ICV read: untouched KELF, then exactly one SCMD 0x98\n"
-        "   after a successful Header -> Blocks -> Kbit -> Kc sequence.\n"
-        "C. Forced flag: reproduces RUN0001 by changing only 0x022c -> 0x022e.\n\n"
-        "Cold-boot between A and B so they do not share MechaCon transaction state.\n"
-        "For the FMCB 1.966 reference KELF, run A first. If A succeeds, reboot\n"
-        "and run B. Mode C is diagnostic history, not the preferred path.",
+        "   after a successful Header -> Blocks -> Kbit -> Kc sequence.\n\n"
+        "Cold-boot between A and B. Forced-flag replay remains diagnostic history.",
         "X Return", UI_TONE_INFO);
     ui_wait_cross();
 }
@@ -139,12 +140,12 @@ static void show_experiment_notes(void)
 int main(void)
 {
     static const ui_menu_item_t menu[] = {
-        {"Native control - mc0", "Untouched KELF; validates the known-good SECR download path", 1},
+        {"Native control - mc0", "Untouched KELF; validates the SECR download path with initialized libmc", 1},
         {"Native + one ICV read - mc0", "Untouched header; attempt one SCMD 0x98 after Kbit/Kc", 1},
         {"Native + one ICV read - mc1", "Same experiment using memory-card port 2", 1},
         {"Forced ICV flag replay - mc0", "Reproduce RUN0001: private RAM header 0x022c -> 0x022e", 1},
         {"Console / MechaCon info", "ROMVER, raw model response, sceCdMV and RTC evidence", 1},
-        {"Experiment protocol", "Exact order for the next hardware tests", 1},
+        {"Experiment protocol", "RUN0002/3 finding and exact next test order", 1},
         {"Return to PS2 Browser", "Leave Mecha Probe through ExecOSD", 1}
     };
     unsigned int selection = 0;
@@ -170,6 +171,13 @@ int main(void)
     if (!sceCdInit(SCECdINIT))
         fatal_startup("libcdvd could not initialize the CDVD/MechaCon RPC path.", -20);
 
+    ui_message("Initializing", "Binding memory-card RPC",
+               "Initializing the EE libmc client exactly as the FreeMcBoot signing path does.",
+               NULL, UI_TONE_INFO);
+    result = mcInit(MC_TYPE_XMC);
+    if (result < 0)
+        fatal_startup("libmc could not initialize MCMAN/MCSERV.", -23);
+
     ui_message("Initializing", "Binding SECR RPC",
                "Waiting for the seven SECRSIF services used by libsecr.",
                NULL, UI_TONE_INFO);
@@ -183,7 +191,7 @@ int main(void)
     for (;;) {
         int choice = ui_menu_select(
             "DriveForge Mecha Probe",
-            "dev.3 | input: mass:/PS2DF-MECHA/input.kelf",
+            "dev.4 | input: mass:/PS2DF-MECHA/input.kelf",
             menu, sizeof(menu) / sizeof(menu[0]), &selection);
 
         if (choice < 0 || choice == 6) {
