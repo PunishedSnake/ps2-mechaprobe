@@ -126,8 +126,8 @@ static void run_probe(int memory_card_port, probe_mode_t mode)
     char auth_error[640];
     const char *detail;
     int mc_result;
-    int mc_type;
-    int mc_format;
+    int mc_type = 0;
+    int mc_format = 0;
 
     if (mode == PROBE_MODE_NATIVE_CONTROL) {
         detail = "dev.9 first asks MCMAN to probe mc via mcGetInfo. MCMAN performs its own normal SecrAuthCard; instrumented SECRMAN only records that existing handshake, then Candidate A runs unchanged.";
