@@ -8,11 +8,28 @@ on:
 permissions:
   contents: read
 
+env:
+  PS2SDK_SECURITY_COMMIT: a13b5971ec0e39c7ba8b8559b80a4e81c8425352
+
 jobs:
   ps2-build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Stage one-pass SECRMAN 1.4 trace backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .build/ps2sdk2-secr-trace
+          docker pull ps2dev/ps2dev:v2.0.0
+          docker run --rm \
+            -v "$PWD:/work" -w /work \
+            -e PS2SDK_SECURITY_COMMIT="$PS2SDK_SECURITY_COMMIT" \
+            ps2dev/ps2dev:v2.0.0 \
+            sh -c 'set -eu; apk add --no-cache git python3 build-base >/dev/null; git init -q /tmp/ps2sdk-src; git -C /tmp/ps2sdk-src remote add origin https://github.com/ps2dev/ps2sdk.git; git -C /tmp/ps2sdk-src fetch -q --depth 1 origin "$PS2SDK_SECURITY_COMMIT"; git -C /tmp/ps2sdk-src checkout -q FETCH_HEAD; python3 /work/tools/patch_secrman14_trace.py /tmp/ps2sdk-src/iop/security/secrman; PS2SDKSRC=/tmp/ps2sdk-src make -C /tmp/ps2sdk-src/iop/security/secrman clean all; PS2SDKSRC=/tmp/ps2sdk-src make -C /tmp/ps2sdk-src/iop/security/secrsif clean all; cp /tmp/ps2sdk-src/iop/security/secrman/irx/secrman.irx /work/.build/ps2sdk2-secr-trace/secrman.irx; cp /tmp/ps2sdk-src/iop/security/secrsif/irx/secrsif.irx /work/.build/ps2sdk2-secr-trace/secrsif.irx'
+          sha256sum .build/ps2sdk2-secr-trace/*.irx
+
       - name: Prepare FreeMcBoot 1.966 reference KELF
         run: |
           python3 - <<'PY'
@@ -31,12 +48,15 @@ jobs:
           open("input.kelf", "wb").write(data)
           open("input.kelf.sha256", "w", encoding="ascii").write(hashlib.sha256(data).hexdigest() + "  input.kelf\n")
           PY
+
       - name: Build stripped PS2 ELF with PS2DEV v2.0.0
         run: >-
           docker run --rm -v "$PWD:/work" -w /work ps2dev/ps2dev:v2.0.0
           sh -c 'apk add --no-cache make >/dev/null && make clean && make release'
+
       - name: Record artifact checksum
         run: sha256sum PS2_MECHAPROBE.ELF | tee PS2_MECHAPROBE.ELF.sha256
+
       - uses: actions/upload-artifact@v4
         with:
           name: PS2-MechaProbe
