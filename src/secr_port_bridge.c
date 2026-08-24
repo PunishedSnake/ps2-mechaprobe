@@ -3,10 +3,10 @@
  * Translate libmc-style logical memory-card ports (0/1) to the physical SIO2
  * memory-card channels (2/3) expected by SECRMAN CardAuth.
  *
- * dev.8 captures one explicit SecrAuthCard() transcript plus the normal one-pass
- * KELF crypto values. No MechaCon or CardAuth command is replayed by this EE
- * shim. The instrumented SECRMAN returns diagnostics in unused areas of the
- * existing 0x1000-byte SECRSIF replies.
+ * dev.9 passively captures the normal MCMAN-initiated SecrAuthCard transcript
+ * plus the normal one-pass KELF crypto values. No extra MechaCon or CardAuth
+ * command is issued by this EE shim. The instrumented SECRMAN returns trace
+ * data in unused areas of the existing 0x1000-byte SECRSIF replies.
  */
 
 #define NEWLIB_PORT_AWARE
@@ -182,7 +182,7 @@ int secr_trace_save(const char *run_dir)
     bytes_to_hex(&AuthTrace[72], 8, cr3);
 
     snprintf(text, sizeof(text),
-             "PS2 Mecha Probe dev.8 explicit-auth + one-pass SECR trace\n"
+             "PS2 Mecha Probe dev.9 passive MCMAN-auth + one-pass SECR trace\n"
              "auth captured:       %s\n"
              "auth cnum/port/slot: %u / %u / %u\n"
              "CardIV:              %s\n"
@@ -199,7 +199,7 @@ int secr_trace_save(const char *run_dir)
              "final Kbit:         %s\n"
              "final Kc:           %s\n"
              "0x98 ICVPS2:        %s\n"
-             "\nOne explicit SecrAuthCard established the captured session immediately before the normal KELF transaction. No SCMD/CardAuth command was replayed for tracing.\n",
+             "\nThe captured SecrAuthCard was initiated by normal MCMAN card probing. The KELF path did not start another authentication and no SCMD/CardAuth command was replayed for tracing.\n",
              HaveAuthTrace ? "yes" : "no",
              HaveAuthTrace ? (unsigned int)AuthTrace[5] : 0u,
              HaveAuthTrace ? (unsigned int)AuthTrace[6] : 0u,
@@ -296,7 +296,7 @@ int __wrap_sceSifCallRpc(SifRpcClientData_t *cd, int fno, int mode,
                 const unsigned char *auth = (const unsigned char *)receive + SECR_TRACE_RPC_OFFSET;
                 memcpy(Icvps2, param->icvps2, 8);
                 HaveIcvps2 = 1;
-                if (auth[0] == 0x4d && auth[1] == 0x47 && auth[2] == 0x41 && auth[3] == 0x38 && auth[4] == 1) {
+                if (auth[0] == 0x4d && auth[1] == 0x47 && auth[2] == 0x41 && auth[3] == 0x39 && auth[4] == 1) {
                     memcpy(AuthTrace, auth, AUTH_TRACE_SIZE);
                     HaveAuthTrace = 1;
                 }
