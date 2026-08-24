@@ -1,8 +1,10 @@
 EE_BIN = PS2_MECHAPROBE.ELF
-EE_OBJS = main.o platform.o ui.o probe.o sha256.o
+EE_OBJS = main.o platform.o ui.o probe.o sha256.o secr_port_bridge.o
 EE_LIBS = -ldebug -lpad -lmc -lfileXio -lpatches -lsecr -lcdvd -lkernel
 EE_CFLAGS = -O2 -G0 -Wall -Wextra -Werror -std=gnu99 -fdata-sections -ffunction-sections -Iinclude
-EE_LDFLAGS = -Wl,--gc-sections
+EE_LDFLAGS = -Wl,--gc-sections \
+	-Wl,--wrap=sceSifBindRpc \
+	-Wl,--wrap=sceSifCallRpc
 
 # Keep the probe independent from whichever IOP image launched it. The order
 # mirrors the hardware-tested fhdb-bootstrap-manager startup chain, minus the
@@ -33,6 +35,9 @@ probe.o: src/probe.c
 	$(EE_CC) $(EE_CFLAGS) $(EE_INCS) -c $< -o $@
 
 sha256.o: src/sha256.c
+	$(EE_CC) $(EE_CFLAGS) $(EE_INCS) -c $< -o $@
+
+secr_port_bridge.o: src/secr_port_bridge.c
 	$(EE_CC) $(EE_CFLAGS) $(EE_INCS) -c $< -o $@
 
 %_irx.c:
