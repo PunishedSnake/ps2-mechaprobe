@@ -71,17 +71,17 @@ Candidate B SHA-256:
 
 Candidate B is no longer required for the primary format hypothesis because Candidate A has been accepted by hardware. Keep it only as historical evidence of the alternative layout considered before validation.
 
-## Port-dependence protocol
+## Port-dependence result
 
-Dev.6 adds `Native control - mc1` and fixes menu visibility with a scrolling window. This permits a clean port comparison without using the unconditional-ICV mode.
+Dev.6 added `Native control - mc1` and a scrolling menu so the same physical card could be tested through both memory-card ports without changing the transaction mode.
 
-For the port test:
+The already-characterized Sony 8 MB card from the mc0 series was moved to mc1 and tested after a cold boot with byte-identical Candidate A.
 
-1. Keep Candidate A byte-identical.
-2. Use one already-characterized card.
-3. Cold boot and run `Native control - mc0`.
-4. Cold boot again, move the same card to mc1, and run `Native control - mc1`.
-5. Compare final Kbit, Kc and ICVPS2 separately.
+The mc1 run completed successfully. Its final Kbit and Kc are byte-for-byte identical to all three earlier mc0 runs made with the same physical card. The returned BIT is also byte-for-byte identical. Comparing the 136-byte processed headers shows that the only differences between the mc1 result and each mc0 result are offsets `0x80..0x87`, i.e. the eight-byte ICVPS2 slot.
+
+The mc1 ICVPS2 value was again different from all prior captures, consistent with the already-observed per-transaction variability.
+
+This result rules out the physical mc0/mc1 port as a determinant of the final card-wrapped Kbit/Kc for this card and KELF. The logical-to-physical SIO2 bridge remains required for communication, but once the correct physical channel is selected the resulting wrapped key material is card-dependent rather than port-dependent.
 
 No MechaCon NVRAM/EEPROM writes are part of this protocol.
 
