@@ -125,14 +125,13 @@ static void run_probe(int memory_card_port, probe_mode_t mode)
 static void show_experiment_notes(void)
 {
     ui_message(
-        "Experiment protocol", "dev.4 restores the missing EE memory-card initialization",
-        "RUN0002/RUN0003 proved the native 0x022c header and encrypted block pass,\n"
-        "but both failed at SecrDownloadGetKbit. FreeMcBoot initializes libmc with\n"
-        "mcInit(MC_TYPE_XMC) before signing; dev.3 did not.\n\n"
-        "A. Native control: untouched KELF, normal libsecr behavior.\n"
-        "B. Native + one ICV read: untouched KELF, then exactly one SCMD 0x98\n"
-        "   after a successful Header -> Blocks -> Kbit -> Kc sequence.\n\n"
-        "Cold-boot between A and B. Forced-flag replay remains diagnostic history.",
+        "Experiment protocol", "dev.5 uses the hardware-validated SECR port bridge",
+        "RUN0004/RUN0005 proved mcInit alone does not fix GET_KBIT.\n"
+        "MagicGate Inspector already established that SECRMAN CardAuth expects\n"
+        "physical SIO2 channels 2/3 while the EE UI uses logical mc0/mc1.\n\n"
+        "dev.5 translates only SECR Header/Kbit/Kc RPC ports: 0->2 and 1->3.\n"
+        "The KELF, MechaCon sequence and ICV experiment are otherwise unchanged.\n\n"
+        "Cold-boot between native control and native + one ICV read.",
         "X Return", UI_TONE_INFO);
     ui_wait_cross();
 }
@@ -140,12 +139,12 @@ static void show_experiment_notes(void)
 int main(void)
 {
     static const ui_menu_item_t menu[] = {
-        {"Native control - mc0", "Untouched KELF; validates the SECR download path with initialized libmc", 1},
+        {"Native control - mc0", "Untouched KELF; SECR CardAuth uses physical SIO2 channel 2", 1},
         {"Native + one ICV read - mc0", "Untouched header; attempt one SCMD 0x98 after Kbit/Kc", 1},
-        {"Native + one ICV read - mc1", "Same experiment using memory-card port 2", 1},
+        {"Native + one ICV read - mc1", "Same experiment; SECR CardAuth uses physical SIO2 channel 3", 1},
         {"Forced ICV flag replay - mc0", "Reproduce RUN0001: private RAM header 0x022c -> 0x022e", 1},
         {"Console / MechaCon info", "ROMVER, raw model response, sceCdMV and RTC evidence", 1},
-        {"Experiment protocol", "RUN0002/3 finding and exact next test order", 1},
+        {"Experiment protocol", "RUN0004/5 finding and physical SECR port mapping", 1},
         {"Return to PS2 Browser", "Leave Mecha Probe through ExecOSD", 1}
     };
     unsigned int selection = 0;
@@ -191,7 +190,7 @@ int main(void)
     for (;;) {
         int choice = ui_menu_select(
             "DriveForge Mecha Probe",
-            "dev.4 | input: mass:/PS2DF-MECHA/input.kelf",
+            "dev.5 | input: mass:/PS2DF-MECHA/input.kelf",
             menu, sizeof(menu) / sizeof(menu[0]), &selection);
 
         if (choice < 0 || choice == 6) {
