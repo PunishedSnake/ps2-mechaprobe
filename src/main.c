@@ -91,7 +91,7 @@ static void show_probe_result(int memory_card_port, const probe_result_t *result
              secr_trace_summary());
 
     ui_message(result->code == 0 ? "Probe complete" : "Probe failed",
-               result->code == 0 ? "Evidence + one-pass SECR trace written to USB"
+               result->code == 0 ? "Evidence + explicit-auth SECR trace written to USB"
                                  : "Failure evidence was preserved when possible",
                body, "X Return", tone);
     ui_wait_cross();
@@ -100,15 +100,15 @@ static void show_probe_result(int memory_card_port, const probe_result_t *result
 static void run_probe(int memory_card_port, probe_mode_t mode)
 {
     probe_result_t result;
-    char body[760];
+    char body[840];
     const char *detail;
 
     if (mode == PROBE_MODE_NATIVE_CONTROL) {
-        detail = "Native control: the KELF header is not modified. dev.7 captures 0x94..0x97 in-band before CardAuth and 0x98 normally if requested.";
+        detail = "dev.8 establishes one fresh SecrAuthCard session immediately before the native KELF transaction, then captures the auth transcript plus 0x94..0x98 in-band.";
     } else if (mode == PROBE_MODE_NATIVE_ICV_READ) {
-        detail = "Native header + one ICV read: retained as a legacy comparison; use Native control with the validated ICV KELF for trace experiments.";
+        detail = "Legacy forced ICV comparison. Do not use this for the dev.8 session experiment.";
     } else {
-        detail = "Forced-flag replay: enables Uses_ICVPS2 in the private RAM copy. Kept only to reproduce RUN0001.";
+        detail = "Forced-flag replay: historical RUN0001 reproduction only.";
     }
 
     snprintf(body, sizeof(body),
@@ -118,7 +118,7 @@ static void run_probe(int memory_card_port, probe_mode_t mode)
              "%s\n\n"
              "Do not remove the memory card or USB device during the probe.",
              PROBE_INPUT_PATH, memory_card_port, probe_mode_name(mode), detail);
-    ui_message("Running KELF probe", "MechaCon / MagicGate transaction active",
+    ui_message("Running KELF probe", "Explicit MagicGate auth + MechaCon transaction",
                body, NULL, UI_TONE_WARNING);
 
     secr_trace_reset();
@@ -131,13 +131,13 @@ static void run_probe(int memory_card_port, probe_mode_t mode)
 static void show_experiment_notes(void)
 {
     ui_message(
-        "Experiment protocol", "dev.7 | one-pass raw MechaCon key trace",
+        "Experiment protocol", "dev.8 | explicit MagicGate session capture",
         "Candidate A remains the validated ICVPS2 KELF.\n\n"
-        "The instrumented SECRMAN copies the real 0x94/95 pre-Kbit and\n"
-        "0x96/97 pre-Kc values before the normal F2/50..53 CardAuth mutates\n"
-        "them. No SCMD or card command is replayed. 0x98 is captured from\n"
-        "the ordinary ICV-enabled transaction.\n\n"
-        "Cold-boot between runs and keep input.kelf byte-identical.",
+        "Before SecrDownloadHeader, the instrumented SECRMAN performs exactly\n"
+        "one SecrAuthCard and captures CardIV, CardMaterial, CardNonce, all\n"
+        "three MechaChallenges and all three CardResponses. The following\n"
+        "normal KELF transaction captures pre-Kbit/pre-Kc, final keys and ICV.\n\n"
+        "No command is replayed for tracing. Cold-boot between runs.",
         "X Return", UI_TONE_INFO);
     ui_wait_cross();
 }
@@ -145,13 +145,13 @@ static void show_experiment_notes(void)
 int main(void)
 {
     static const ui_menu_item_t menu[] = {
-        {"Native control - mc0", "Validated path; captures pre-Kbit/pre-Kc/final keys/ICV in one pass", 1},
-        {"Native control - mc1", "Same one-pass trace through physical SIO2 channel 3", 1},
+        {"Auth + native trace - mc0", "Fresh SecrAuthCard session, then validated Candidate-A KELF path", 1},
+        {"Auth + native trace - mc1", "Same experiment through physical SIO2 channel 3", 1},
         {"Native + one ICV read - mc0", "Legacy forced-read comparison", 1},
         {"Native + one ICV read - mc1", "Legacy forced-read comparison on mc1", 1},
         {"Forced ICV flag replay - mc0", "Historical RUN0001 reproduction only", 1},
         {"Console / MechaCon info", "ROMVER, raw model response, sceCdMV and RTC evidence", 1},
-        {"Experiment protocol", "dev.7 one-pass 0x94..0x98 trace notes", 1},
+        {"Experiment protocol", "dev.8 auth/session capture notes", 1},
         {"Return to PS2 Browser", "Leave Mecha Probe through ExecOSD", 1}
     };
     unsigned int selection = 0;
@@ -197,7 +197,7 @@ int main(void)
     for (;;) {
         int choice = ui_menu_select(
             "DriveForge Mecha Probe",
-            "dev.7 | one-pass 0x94..0x98 trace",
+            "dev.8 | explicit auth + 0x94..0x98 trace",
             menu, sizeof(menu) / sizeof(menu[0]), &selection);
 
         if (choice < 0 || choice == 7) {
