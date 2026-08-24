@@ -3,7 +3,7 @@
 
 #define PROBE_INPUT_PATH "mass:/PS2DF-MECHA/input.kelf"
 #define PROBE_ROOT_PATH "mass:/PS2DF-MECHA"
-#define PROBE_VERSION "0.1.0-dev.5"
+#define PROBE_VERSION "0.1.0-dev.6"
 
 typedef enum {
     PROBE_MODE_NATIVE_CONTROL = 0,
