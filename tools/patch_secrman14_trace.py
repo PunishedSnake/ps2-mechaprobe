@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Instrument pinned PS2SDK SECRMAN 1.4 for dev.8 auth/session tracing.
+"""Instrument pinned PS2SDK SECRMAN 1.4 for dev.9 passive auth/session tracing.
 
-The normal KELF binding path is retained, but SecrDownloadHeader() first performs
-one explicit SecrAuthCard() using the same physical SIO2 port/cnum that will be
-used for the KELF transaction. This deliberately establishes a fresh, known
-MagicGate session instead of inheriting whatever session the launcher left.
+Important: this patch does NOT start a second SecrAuthCard transaction from the KELF
+path. MCMAN already authenticates a PS2 memory card during its normal card probe.
+dev.9 passively records that stock MCMAN -> SecrAuthCard handshake, then preserves
+it until the subsequent Candidate-A KELF transaction reaches ICVPS2.
 
-The patch captures, without replaying commands:
+Captured without replaying commands:
 - CardIV, CardMaterial and CardNonce
 - MechaChallenge1/2/3
 - CardResponse1/2/3
 - raw pre-CardAuth 0x94/0x95 Kbit and 0x96/0x97 Kc
-- the normal final Kbit/Kc and ICVPS2 remain returned through stock RPC fields
+- normal final Kbit/Kc and ICVPS2
 
-The 72-byte auth transcript plus an 8-byte header is copied to unused offset
-0x100 of the final ICVPS2 RPC reply. Kbit/Kc pre-values continue to use offset
-0x100 of their own independent 0x1000-byte RPC replies.
+The 72-byte auth transcript plus an 8-byte header is copied to unused offset 0x100
+of the final ICVPS2 RPC reply. Kbit/Kc pre-values continue to use offset 0x100 of
+their independent 0x1000-byte RPC replies.
 """
 
 import pathlib
@@ -58,7 +58,7 @@ if marker not in text:
     raise SystemExit("missing SECRMAN export marker")
 text = text.replace(marker, marker + r'''
 
-/* dev.8 controlled authentication transcript. */
+/* dev.9 passive capture of the normal MCMAN-initiated card authentication. */
 static unsigned char MgTraceAuth[80];
 static int MgTraceAuthValid;
 
@@ -68,19 +68,25 @@ static void MgTraceResetAuth(void)
     MgTraceAuth[0] = 0x4d; /* M */
     MgTraceAuth[1] = 0x47; /* G */
     MgTraceAuth[2] = 0x41; /* A */
-    MgTraceAuth[3] = 0x38; /* 8 */
+    MgTraceAuth[3] = 0x39; /* 9 */
     MgTraceAuthValid = 0;
 }
 ''', 1)
 
-# Replace SecrAuthCard with the stock logic plus an in-place success capture.
+# Instrument the stock SecrAuthCard used by MCMAN. Reset at the start of the
+# real authentication and capture only after the complete handshake succeeds.
 start, end = find_function(text, "int SecrAuthCard(")
 auth = text[start:end]
-needle = "    return 1;\n\nError2_end:"
-if needle not in auth:
+first_check = "\n\n    if (GetMcCommandHandler() == NULL) {"
+if first_check not in auth:
+    raise SystemExit("SecrAuthCard first-check marker not found")
+auth = auth.replace(first_check,
+                    "\n\n    MgTraceResetAuth();\n" + first_check[1:], 1)
+
+success_marker = "    return 1;\n\nError2_end:"
+if success_marker not in auth:
     raise SystemExit("SecrAuthCard success marker not found")
-capture = r'''    /* Capture exactly the successful authentication that established the
-       session used by the following KELF binding transaction. */
+capture = r'''    /* This is the exact successful authentication performed by MCMAN. */
     MgTraceAuth[4] = 1;
     MgTraceAuth[5] = (unsigned char)cnum;
     MgTraceAuth[6] = (unsigned char)port;
@@ -99,25 +105,8 @@ capture = r'''    /* Capture exactly the successful authentication that establis
     return 1;
 
 Error2_end:'''
-auth = auth.replace(needle, capture, 1)
+auth = auth.replace(success_marker, capture, 1)
 text = text[:start] + auth + text[end:]
-
-# Establish a fresh explicit card-auth session immediately before normal header
-# processing. cnum is still obtained through the stock callback.
-start, end = find_function(text, "int SecrDownloadHeader(")
-header = text[start:end]
-needle = "    if (secr_set_header(2, cnum, 0, buffer) == 0) {"
-if needle not in header:
-    raise SystemExit("SecrDownloadHeader set-header marker not found")
-insert = r'''    MgTraceResetAuth();
-    if (SecrAuthCard(port, slot, cnum) == 0) {
-        _printf("dev8 explicit SecrAuthCard failed\n");
-        return 0;
-    }
-
-    if (secr_set_header(2, cnum, 0, buffer) == 0) {'''
-header = header.replace(needle, insert, 1)
-text = text[:start] + header + text[end:]
 
 new_kbit = f'''int SecrDownloadGetKbit(int port, int slot, void *kbit)
 {{
@@ -170,4 +159,4 @@ text = replace_function(text, "int SecrDownloadGetKc(", new_kc)
 text = replace_function(text, "int SecrDownloadGetICVPS2(", new_icv)
 SECRMAN.write_text(text)
 
-print("PS2SDK SECRMAN 1.4 dev.8 explicit-auth/session instrumentation applied")
+print("PS2SDK SECRMAN 1.4 dev.9 passive MCMAN-auth/session instrumentation applied")
