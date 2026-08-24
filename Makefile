@@ -1,6 +1,6 @@
 EE_BIN = PS2_MECHAPROBE.ELF
 EE_OBJS = main.o platform.o ui.o probe.o sha256.o
-EE_LIBS = -ldebug -lpad -lfileXio -lpatches -lsecr -lcdvd -lkernel
+EE_LIBS = -ldebug -lpad -lmc -lfileXio -lpatches -lsecr -lcdvd -lkernel
 EE_CFLAGS = -O2 -G0 -Wall -Wextra -Werror -std=gnu99 -fdata-sections -ffunction-sections -Iinclude
 EE_LDFLAGS = -Wl,--gc-sections
 
