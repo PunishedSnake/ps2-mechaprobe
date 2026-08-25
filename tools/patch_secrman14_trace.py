@@ -1,12 +1,27 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Instrument pinned PS2SDK SECRMAN 1.4 for dev.11.
+"""Instrument pinned PS2SDK SECRMAN 1.4 for dev.12.
 
-Preserve the hardware-successful dev.10 semantics: no mcGetInfo, F3,
-SecrAuthCard replay, MechaCon replay or extra card command. Capture the stock
-0x94..0x97/F2 path and, if one happens naturally after module load, remember the
-last successful SecrAuthCard transcript. The KELF path never starts or resets
-that authentication.
+Preserve the hardware-successful dev.10/dev.11 semantics: no mcGetInfo, F3,
+SecrAuthCard replay, MechaCon replay or extra card command.
+
+In addition to the existing 0x94..0x97/F2 trace and last naturally successful
+SecrAuthCard transcript, dev.12 passively counts *all calls* to SecrAuthCard and
+successful completions. This removes the dev.11 ambiguity between "not called"
+and "called but failed".
+
+No RPC layout change is needed. The counters are copied into bytes that were
+already reserved/unused in the raw 56-byte MGF2 trace records, which the EE side
+already saves verbatim:
+
+  trace[7]  = SecrAuthCard call count snapshot
+  trace[28] = successful SecrAuthCard count snapshot
+  trace[29] = last attempted physical port
+  trace[30] = last attempted slot
+  trace[31] = last attempted cnum
+  trace[52] = whether a successful auth transcript is currently available
+
+The existing visible F2 record fields remain unchanged.
 """
 
 import pathlib
@@ -77,6 +92,20 @@ helpers = r'''
 static unsigned char MgF2Trace[MG_F2_TRACE_SIZE];
 static unsigned char MgAuthTrace[MG_AUTH_TRACE_SIZE];
 static int MgAuthTraceValid;
+static unsigned char MgAuthCallCount;
+static unsigned char MgAuthSuccessCount;
+static unsigned char MgAuthLastPort;
+static unsigned char MgAuthLastSlot;
+static unsigned char MgAuthLastCnum;
+
+static void MgAuthAttemptBegin(int port, int slot, int cnum)
+{
+    if (MgAuthCallCount != 0xff)
+        MgAuthCallCount++;
+    MgAuthLastPort = (unsigned char)port;
+    MgAuthLastSlot = (unsigned char)slot;
+    MgAuthLastCnum = (unsigned char)cnum;
+}
 
 static void MgF2TraceReset(unsigned char kind)
 {
@@ -88,6 +117,7 @@ static void MgF2TraceReset(unsigned char kind)
     MgF2Trace[4] = 1;
     MgF2Trace[5] = 0;
     MgF2Trace[6] = kind;
+    MgF2Trace[7] = MgAuthCallCount;
 }
 
 static int MgF2TraceBegin(int port, int slot, const void *input)
@@ -135,6 +165,15 @@ static void MgF2TraceFinish(int index, const void *output)
 
 static void MgF2TraceCopy(void *dest)
 {
+    /* Reserved bytes in the existing trace format carry passive auth-call
+       metadata in dev.12. The EE parser ignores these bytes, but saves the raw
+       trace verbatim for offline decoding. */
+    MgF2Trace[7] = MgAuthCallCount;
+    MgF2Trace[28] = MgAuthSuccessCount;
+    MgF2Trace[29] = MgAuthLastPort;
+    MgF2Trace[30] = MgAuthLastSlot;
+    MgF2Trace[31] = MgAuthLastCnum;
+    MgF2Trace[52] = MgAuthTraceValid ? 1 : 0;
     memcpy(dest, MgF2Trace, sizeof(MgF2Trace));
 }
 
@@ -148,6 +187,8 @@ static void MgAuthTraceCapture(int port, int slot, int cnum,
                                const void *CardResponse2,
                                const void *CardResponse3)
 {
+    if (MgAuthSuccessCount != 0xff)
+        MgAuthSuccessCount++;
     memset(MgAuthTrace, 0, sizeof(MgAuthTrace));
     MgAuthTrace[0] = 'M'; MgAuthTrace[1] = 'G';
     MgAuthTrace[2] = 'A'; MgAuthTrace[3] = '1';
@@ -169,10 +210,19 @@ static void MgAuthTraceCapture(int port, int slot, int cnum,
 '''
 text = text.replace(marker, marker + helpers, 1)
 
-# Passive hook: only remember the stock function after it has completely
-# succeeded. Do not call it and do not clear an earlier successful trace.
+# Passive hook: count every stock SecrAuthCard call, then remember the full
+# transcript only if that normal call reaches its original success return.
 auth_start, auth_end = find_function(text, "int SecrAuthCard(")
 auth = text[auth_start:auth_end]
+entry_needle = "\n\n    if (GetMcCommandHandler() == NULL) {"
+if entry_needle not in auth:
+    raise SystemExit("SecrAuthCard entry marker not found")
+auth = auth.replace(
+    entry_needle,
+    "\n\n    MgAuthAttemptBegin(port, slot, cnum);" + entry_needle,
+    1,
+)
+
 needle = '    _printf("mechacon auth 0x88\\n");\n\n    return 1;'
 if needle not in auth:
     needle = '    _printf("mechacon auth 0x88!\\n");\n\n    return 1;'
@@ -185,8 +235,6 @@ capture = r'''    _printf("mechacon auth 0x88\n");
                        MechaChallenge1, MechaChallenge2, MechaChallenge3,
                        CardResponse1, CardResponse2, CardResponse3);
     return 1;'''
-# The raw string above deliberately carries C's \n, but Python does not need
-# backslashes in front of C quote characters.
 capture = capture.replace('\\"', '"')
 auth = auth.replace(needle, capture, 1)
 text = text[:auth_start] + auth + text[auth_end:]
@@ -274,4 +322,4 @@ text = replace_function(text, "int SecrDownloadGetKbit(", new_kbit)
 text = replace_function(text, "int SecrDownloadGetKc(", new_kc)
 text = replace_function(text, "int SecrDownloadGetICVPS2(", new_icv)
 SECRMAN.write_text(text)
-print("PS2SDK SECRMAN 1.4 dev.11 passive F2 + natural-auth instrumentation applied")
+print("PS2SDK SECRMAN 1.4 dev.12 passive auth-call counter + F2 trace applied")
