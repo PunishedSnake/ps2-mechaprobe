@@ -133,6 +133,15 @@ void platform_exit_browser(void)
     static char *browser_args[] = {"BootBrowser", NULL};
 
     padPortClose(0, 0);
+
+    /* Mecha Probe deliberately installs a custom IOP security personality.
+       ExecOSD alone does not undo that. Reset to the ROM IOP image before the
+       warm Browser hand-off so instrumented SECRMAN/MCMAN state is not carried
+       into OSDSYS/FMCB detection. */
+    while (!SifIopReset(NULL, 0)) {}
+    while (!SifIopSync()) {}
+    sceSifInitRpc(0);
+
     ExecOSD(1, browser_args);
     SleepThread();
 }
