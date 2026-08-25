@@ -16,7 +16,6 @@
 static void fatal_startup(const char *message, int code)
 {
     char body[512];
-
     snprintf(body, sizeof(body),
              "%s\n\nStartup code: %d\n\nPower-cycle the console after noting the code.",
              message, code);
@@ -32,16 +31,10 @@ static void show_system_info(void)
 
     probe_collect_system_info(&info);
     snprintf(body, sizeof(body),
-             "ROMVER: %s\n"
-             "Model: %s\n"
-             "Model raw: %s\n"
-             "Model query: %d status=0x%08x\n"
-             "MechaCon MV raw: %s\n"
-             "MechaCon status: 0x%08x\n"
-             "MechaCon version: %s\n"
-             "MagicGate region: %s\n"
-             "System type: %s\n"
-             "RTC: %s",
+             "ROMVER: %s\nModel: %s\nModel raw: %s\n"
+             "Model query: %d status=0x%08x\nMechaCon MV raw: %s\n"
+             "MechaCon status: 0x%08x\nMechaCon version: %s\n"
+             "MagicGate region: %s\nSystem type: %s\nRTC: %s",
              info.romver, info.model, info.model_raw_hex,
              info.model_result, info.model_status,
              info.mv_raw_hex, info.mv_status, info.mechacon_version,
@@ -53,45 +46,34 @@ static void show_system_info(void)
 
 static void show_probe_result(int memory_card_port, const probe_result_t *result)
 {
-    char body[2000];
+    char body[2100];
     const char *icv = result->icvps2_valid ? result->icvps2_hex : "not present";
     int tone = result->code == 0 ? UI_TONE_SUCCESS : UI_TONE_DANGER;
 
     snprintf(body, sizeof(body),
-             "Result: %s\n"
-             "Mode: %s\n"
-             "Stage: %s\n"
-             "Code: %d\n"
-             "Memory card: mc%d slot 0\n"
-             "Evidence: %s\n"
-             "Input bytes: %u\n"
-             "SHA-256: %s\n"
-             "Flags original/effective: 0x%04x / 0x%04x\n"
-             "Header / BIT entries: %u / %u\n"
-             "KELF Uses ICVPS2: %s\n"
-             "ICV read attempted: %s%s\n"
-             "ICVPS2: %s\n"
-             "Returned BIT blocks: %u\n"
-             "Encrypted blocks sent: %u\n"
-             "Evidence write result: %d\n"
-             "SECR trace: %s",
+             "Result: %s\nMode: %s\nStage: %s\nCode: %d\n"
+             "Memory card: mc%d slot 0\nEvidence: %s\nInput bytes: %u\n"
+             "SHA-256: %s\nFlags original/effective: 0x%04x / 0x%04x\n"
+             "Header / BIT entries: %u / %u\nKELF Uses ICVPS2: %s\n"
+             "ICV read attempted: %s%s\nICVPS2: %s\nReturned BIT blocks: %u\n"
+             "Encrypted blocks sent: %u\nEvidence write result: %d\nSECR trace: %s",
              result->code == 0 ? "SUCCESS" : "FAILED",
-             probe_mode_name(result->mode),
-             result->stage, result->code, memory_card_port,
+             probe_mode_name(result->mode), result->stage, result->code,
+             memory_card_port,
              result->run_dir[0] != '\0' ? result->run_dir : "not created",
-             result->input_size, result->sha256[0] != '\0' ? result->sha256 : "n/a",
+             result->input_size,
+             result->sha256[0] != '\0' ? result->sha256 : "n/a",
              result->original_flags, result->flags,
              result->header_size, result->bit_count,
              result->uses_icvps2 ? "yes" : "no",
              result->icvps2_read_attempted ? "yes" : "no",
              result->icvps2_read_unconditional ? " (unconditional)" : "",
              icv, result->returned_block_count,
-             result->processed_encrypted_blocks,
-             result->evidence_result,
+             result->processed_encrypted_blocks, result->evidence_result,
              secr_trace_summary());
 
     ui_message(result->code == 0 ? "Probe complete" : "Probe failed",
-               result->code == 0 ? "Evidence + passive F2/50-53 trace written to USB"
+               result->code == 0 ? "Evidence + passive F2/auth trace written to USB"
                                  : "Failure evidence was preserved when possible",
                body, "X Return", tone);
     ui_wait_cross();
@@ -100,25 +82,22 @@ static void show_probe_result(int memory_card_port, const probe_result_t *result
 static void run_probe(int memory_card_port, probe_mode_t mode)
 {
     probe_result_t result;
-    char body[920];
+    char body[980];
     const char *detail;
 
     if (mode == PROBE_MODE_NATIVE_CONTROL) {
-        detail = "dev.10 preserves the hardware-successful dev.7 path. It issues no mcGetInfo/F3 reset and no explicit SecrAuthCard. The stock KELF transaction is observed only around its four F2/50-53 card_encrypt calls.";
+        detail = "dev.11 preserves dev.10 exactly: no mcGetInfo/F3, no explicit SecrAuthCard and no replay. It passively records F2/50-53 and reports the last natural successful SecrAuthCard only if one occurred after instrumented SECRMAN loaded.";
     } else if (mode == PROBE_MODE_NATIVE_ICV_READ) {
-        detail = "Legacy forced ICV comparison. No MCMAN probe is injected before the KELF transaction.";
+        detail = "Legacy forced ICV comparison. Do not use for the controlled dev.11 session experiment.";
     } else {
         detail = "Forced-flag replay: historical RUN0001 reproduction only.";
     }
 
     snprintf(body, sizeof(body),
-             "Input: %s\n"
-             "MagicGate card: mc%d slot 0\n"
-             "Mode: %s\n\n"
-             "%s\n\n"
+             "Input: %s\nMagicGate card: mc%d slot 0\nMode: %s\n\n%s\n\n"
              "Do not remove the memory card or USB device during the probe.",
              PROBE_INPUT_PATH, memory_card_port, probe_mode_name(mode), detail);
-    ui_message("Running KELF probe", "Native MechaCon + F2 CardAuth transaction",
+    ui_message("Running KELF probe", "Passive MechaCon / MagicGate observation",
                body, NULL, UI_TONE_WARNING);
 
     secr_trace_reset();
@@ -131,16 +110,14 @@ static void run_probe(int memory_card_port, probe_mode_t mode)
 static void show_experiment_notes(void)
 {
     ui_message(
-        "Experiment protocol", "dev.10 | native F2/50-53 transform capture",
-        "Candidate A remains the validated ICVPS2 KELF.\n\n"
-        "dev.9 showed that forcing mcGetInfo can enter MCMAN reset-auth (F3) and\n"
-        "leave a warm-boot-visible security state. dev.10 removes that probe.\n"
-        "The successful dev.7 transaction order is restored exactly.\n\n"
-        "For Kbit and Kc, each stock card_encrypt half records input bytes,\n"
-        "F2/50-53 success mask and F2/53 output. No command is replayed.\n\n"
-        "Use Return to PS2 Browser when finished; dev.10 resets the IOP back to\n"
-        "the ROM environment before ExecOSD so the custom security stack is not\n"
-        "carried into a warm Browser return.",
+        "Experiment protocol", "dev.11 | passive natural-auth observation",
+        "The native KELF/F2 transaction order is unchanged from hardware-successful dev.10.\n\n"
+        "Instrumented SECRMAN remembers a naturally occurring successful full\n"
+        "SecrAuthCard only if the normal stack performs one after module load.\n"
+        "The probe never requests or resets that auth.\n\n"
+        "auth-trace-status.txt explicitly says whether such a transcript was\n"
+        "observed. A clean 'false' is a useful result, not a probe failure.\n\n"
+        "Return to Browser still restores the ROM IOP environment first.",
         "X Return", UI_TONE_INFO);
     ui_wait_cross();
 }
@@ -148,13 +125,13 @@ static void show_experiment_notes(void)
 int main(void)
 {
     static const ui_menu_item_t menu[] = {
-        {"Native F2 trace - mc0", "Validated Candidate-A path; passive F2/50-53 capture", 1},
-        {"Native F2 trace - mc1", "Same native transaction through memory-card port 1", 1},
+        {"Native F2+auth trace - mc0", "Normal KELF path; passive F2 and natural-auth observation", 1},
+        {"Native F2+auth trace - mc1", "Same experiment through memory-card port 1", 1},
         {"Native + one ICV read - mc0", "Legacy forced-read comparison", 1},
         {"Native + one ICV read - mc1", "Legacy forced-read comparison on mc1", 1},
         {"Forced ICV flag replay - mc0", "Historical RUN0001 reproduction only", 1},
         {"Console / MechaCon info", "ROMVER, raw model response, sceCdMV and RTC evidence", 1},
-        {"Experiment protocol", "dev.10 native F2 trace and safe-exit notes", 1},
+        {"Experiment protocol", "dev.11 passive-auth and safe-exit notes", 1},
         {"Return to PS2 Browser", "Restore ROM IOP state, then leave through ExecOSD", 1}
     };
     unsigned int selection = 0;
@@ -181,7 +158,7 @@ int main(void)
         fatal_startup("libcdvd could not initialize the CDVD/MechaCon RPC path.", -20);
 
     ui_message("Initializing", "Binding memory-card RPC",
-               "Initializing the EE libmc client without probing/resetting card auth state.",
+               "Initializing libmc without probing/resetting card auth state.",
                NULL, UI_TONE_INFO);
     result = mcInit(MC_TYPE_XMC);
     if (result < 0)
@@ -200,7 +177,7 @@ int main(void)
     for (;;) {
         int choice = ui_menu_select(
             "DriveForge Mecha Probe",
-            "dev.10 | native F2/50-53 trace",
+            "dev.11 | passive F2 + natural-auth trace",
             menu, sizeof(menu) / sizeof(menu[0]), &selection);
 
         if (choice < 0 || choice == 7) {
@@ -222,6 +199,5 @@ int main(void)
         else if (choice == 6)
             show_experiment_notes();
     }
-
     return 0;
 }
