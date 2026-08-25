@@ -2,7 +2,7 @@
 
 Developer-oriented PlayStation 2 homebrew for probing the MechaCon / MagicGate KELF download path and collecting reproducible ICVPS2 evidence.
 
-The project started with a basic question: **what does MechaCon return for SCMD `0x98`, and what inputs or session state make that value change?** It has now progressed beyond a simple ICV dump into direct one-pass observation of the session-wrapped Kbit/Kc material and the stock card-side F2 binding transform.
+The project started with a basic question: **what does MechaCon return for SCMD `0x98`, and what inputs or session state make that value change?** It has progressed into direct real-hardware observation of session-wrapped Kbit/Kc, stock card-side F2 binding and transaction-variable ICVPS2.
 
 ## Current hardware-validated status
 
@@ -13,61 +13,80 @@ The following are confirmed on real retail PS2 hardware:
 - the normal native path completes `Header -> encrypted block -> Kbit -> Kc -> ICVPS2` and returns a real 8-byte SCMD `0x98` value;
 - ICVPS2 changes between transactions even with byte-identical KELF and the same physical card;
 - final card-wrapped Kbit/Kc are stable per tested physical card but differ between cards;
-- the MechaCon pre-card material returned by `0x94..0x97` changes between cold boots;
-- dev.10 directly traces all four stock `F2/50 -> F2/51 -> F2/52 -> F2/53` key-binding operations without replay and shows changing session-wrapped inputs being converted into stable card-bound outputs for the same physical card;
+- MechaCon pre-card material returned by `0x94..0x97` changes between cold boots;
+- dev.10 directly traces all four stock `F2/50 -> F2/51 -> F2/52 -> F2/53` operations without replay;
+- Candidate C, with four distinct plaintext content-key halves, completed 9/9 real-hardware runs across two Sony 8 MB cards and one unbranded 64 MB MagicGate-capable card;
+- in all nine Candidate-C runs the four pre-card values changed with the transaction while each corresponding F2 output stayed stable for a fixed physical card;
+- changing the physical card changes the stable card-bound mapping for every tested plaintext block;
+- the two Sony cards behave consistently with stateless repeated-plaintext wrapping in the existing Candidate-A evidence, while the unbranded 64 MB card showed four different stable outputs for four identical Candidate-A plaintext positions, motivating a dedicated A/B/A/B position/state test;
 - mc0/mc1 does not change final card-bound Kbit/Kc once the correct physical SIO2 channel is selected;
 - injecting a second full `SecrAuthCard` or forcing MCMAN's `F3` reset-auth path changes the security state and is not part of the controlled KELF-binding experiment.
 
-The full exact hardware record, including per-card Kbit/Kc, ICVPS2 values, dev.7 pre-key vectors, dev.10 F2 input/output vectors and negative-state experiments, is in:
+Research records:
 
-- [`docs/ICVPS2_RESEARCH_RECORD.md`](docs/ICVPS2_RESEARCH_RECORD.md)
-- [`docs/ICVPS2_EXPERIMENT.md`](docs/ICVPS2_EXPERIMENT.md)
-- [`docs/SECR_TRACE_DEV7.md`](docs/SECR_TRACE_DEV7.md)
+- [`docs/ICVPS2_RESEARCH_RECORD.md`](docs/ICVPS2_RESEARCH_RECORD.md) - full experiment timeline through Candidate C preparation;
+- [`docs/CANDIDATE_C_HARDWARE_RESULTS.md`](docs/CANDIDATE_C_HARDWARE_RESULTS.md) - exact nine-run Candidate C dataset and next hypotheses;
+- [`docs/ICVPS2_EXPERIMENT.md`](docs/ICVPS2_EXPERIMENT.md) - ICV-enabled KELF reconstruction;
+- [`docs/SECR_TRACE_DEV7.md`](docs/SECR_TRACE_DEV7.md) - first one-pass pre-card trace.
 
-## v0.1 development scope
+## Transaction model currently supported by hardware evidence
 
-The probe builds its own known IOP environment with PS2SDK modules, initializes `SECRMAN` / `SECRSIF`, processes one KELF through an instrumented equivalent of `SecrDownloadFile()`, and exports the resulting evidence to USB.
+Public `ps3mca_tool` source models each plaintext Kbit/Kc half as encrypted under the active MagicGate SessionKey before card binding. Its F2 implementation describes the card as removing session-key wrapping and re-encrypting the content key with card storage-key material.
 
-Instead of calling `SecrDownloadFile()` as an opaque helper, the program deliberately performs the same public PS2SDK sequence stage by stage:
+The probe's real-hardware observations are consistent with that boundary:
+
+```text
+plaintext Kbit/Kc half
+        |
+        v
+MechaCon/session transform (0x94..0x97)
+        |
+        v
+transaction-variable pre-card value
+        |
+        v
+stock F2/50 -> 51 -> 52 -> 53
+        |
+        v
+stable card-bound value for the physical card/plaintext
+```
+
+ICVPS2 is returned in parallel from normal SCMD `0x98` and remains transaction-variable in the collected datasets. Its exact dependency is not yet reconstructed.
+
+## Probe scope
+
+The probe builds a known IOP environment with PS2SDK modules, initializes `SECRMAN` / `SECRSIF`, processes one KELF through an instrumented equivalent of `SecrDownloadFile()`, and exports evidence to USB.
+
+The public sequence is executed stage by stage:
 
 1. `SecrDownloadHeader(port, slot, ...)`
 2. `SecrDownloadBlock(...)` for encrypted BIT entries
 3. `SecrDownloadGetKbit(port, slot, ...)`
 4. `SecrDownloadGetKc(port, slot, ...)`
-5. `SecrDownloadGetICVPS2(...)` exactly once when KELF flag bit 1 says ICVPS2 is used
-6. write Kbit, Kc and ICVPS2 into the processed header at the same offsets used by PS2SDK `libsecr`
+5. `SecrDownloadGetICVPS2(...)` exactly once when the KELF requests ICVPS2
+6. store Kbit, Kc and ICVPS2 at the normal PS2SDK offsets.
 
-Doing this explicitly lets an evidence bundle record the exact stage that failed. It also prevents a second post-transaction `0x98` call from being confused with the ICV returned inside the original KELF transaction.
-
-The current dev.10 instrumentation additionally captures the actual stock `card_encrypt()` boundary for each 8-byte Kbit/Kc half without inserting additional card commands.
+This avoids confusing a second post-transaction `0x98` with the value belonging to the actual KELF transaction.
 
 ## Input
 
-Create this directory on a FAT USB device:
-
-```text
-mass:/PS2DF-MECHA/
-```
-
-Put the KELF to test at:
+Use a FAT USB device with:
 
 ```text
 mass:/PS2DF-MECHA/input.kelf
 ```
 
-The current development build accepts KELFs up to 16 MiB. The selected `mc0` or `mc1` must contain a compatible PS2 MagicGate memory card because the download-header and key stages use the card path.
+Current development builds accept KELFs up to 16 MiB. Slot 0 of the selected physical memory-card port is used by the experiment.
 
 ## Evidence bundle
 
-Each run creates the next free directory:
+Each run creates the next free directory under:
 
 ```text
-mass:/PS2DF-MECHA/RUN0001/
-mass:/PS2DF-MECHA/RUN0002/
-...
+mass:/PS2DF-MECHA/RUNxxxx/
 ```
 
-A successful dev.10 ICV/F2-trace run may contain:
+A successful F2-trace run may include:
 
 ```text
 probe.json
@@ -95,15 +114,19 @@ f2-kc-half1-output.bin
 secr-trace.txt
 ```
 
-`probe.json` records the input identity, KELF header flags, BIT counts, transaction progress, ROMVER, best-effort model information, raw `sceCdMV()` data, MagicGate region/version interpretation, RTC evidence and ICVPS2.
+Dev.11 additionally passively reports whether the instrumented SECRMAN observed a naturally occurring successful full `SecrAuthCard()` after module load. It never starts or resets that auth itself. The decisive status is written to:
 
-`processed-header.bin` contains the header after Kbit/Kc/ICVPS2 have been placed at the same offsets as PS2SDK `libsecr`.
+```text
+auth-trace-status.txt
+```
 
-The F2 trace uses a success bitmap where `0x0f` means the stock `F2/50`, `F2/51`, `F2/52` and `F2/53` sequence completed for that 8-byte half.
+If present, the full transcript is also exported as `auth-trace.bin` plus CardIV/CardMaterial/CardNonce, MechaChallenge1..3 and CardResponse1..3 files.
 
-## Validated ICV-enabled KELF
+## Validated / controlled KELF vectors
 
-Candidate A is the first hardware-validated experiment vector:
+### Candidate A
+
+First hardware-validated ICV-enabled format:
 
 ```text
 flags       = 0x022e
@@ -111,15 +134,37 @@ header size = 0x0088
 SHA-256     = e317a0a287939a93961a376f0bd3ed47e051029ee2e45f1fc17ca8db5f22d27a
 ```
 
-The next vector, Candidate C, preserves the validated format and payload but deliberately uses four distinct plaintext Kbit/Kc halves. It is intended to produce four independent session/F2 equations per transaction instead of repeating the same plaintext block four times.
+Its four plaintext content-key halves are identical (`3939393939393939`).
 
-Candidate C SHA-256:
+### Candidate C
+
+Four independent plaintext blocks in one session:
 
 ```text
-87de11f092965122ea01bd6e3a908f5876cca0a42aaa49037bd63a39066d056d
+Kbit0 = 0011223344556677
+Kbit1 = 8899aabbccddeeff
+Kc0   = fedcba9876543210
+Kc1   = 0f1e2d3c4b5a6978
+SHA-256 = 87de11f092965122ea01bd6e3a908f5876cca0a42aaa49037bd63a39066d056d
 ```
 
-The reproducible research generator is:
+Candidate C is hardware-validated across all three test cards.
+
+### Candidate D
+
+Next card-side discrimination vector deliberately repeats plaintexts by position:
+
+```text
+A = 0123456789abcdef
+B = fedcba9876543210
+Kbit = A || B
+Kc   = A || B
+SHA-256 = 437ab24cf29476d372071af60b9de0d86ae15d8f67fc0ee4061c19fa46b50670
+```
+
+It tests whether identical plaintexts within one session yield identical final F2 outputs independent of Kbit/Kc position, especially on the unbranded 64 MB card.
+
+The reproducible vector generator is:
 
 ```text
 tools/make_icv_test_kelf.py
@@ -127,34 +172,26 @@ tools/make_icv_test_kelf.py
 
 It intentionally contains no PlayStation key material and requires a user-supplied kelftool-compatible `PS2KEYS.dat`.
 
-## UI / safety
-
-The frontend is a deliberately small derivative of the interaction language used by `fhdb-bootstrap-manager`: dark status panels, highlighted two-line menu cards, short contextual hints and `X` to open/continue.
+## Safety
 
 The probe does not intentionally write MechaCon NVRAM, console IDs, EEPROM data or memory-card filesystem contents. It does execute real SECR/MagicGate transactions against the selected card and MechaCon.
 
-A negative dev.9 experiment showed that forcing MCMAN's auth-reset path can leave a confusing warm-boot security state. The current Browser-return path resets the IOP back to the ROM environment before `ExecOSD`; controlled research runs should still use a full power-off between samples.
+A negative dev.9 experiment showed that forcing MCMAN's auth-reset path can leave a confusing warm-boot security state. Current Browser return resets the IOP to the ROM environment before `ExecOSD`; controlled research runs should still use a full power-off between samples.
 
-Do not treat a warm-return FMCB detection failure as evidence of filesystem corruption without first preserving evidence and performing a real cold-power check.
+Do not treat warm-return FMCB detection failure as filesystem corruption without preserving evidence and performing a real cold-power check first.
 
 ## Build
-
-With a current PS2DEV / PS2SDK environment:
 
 ```sh
 make
 ```
 
-For a stripped hardware build:
+or stripped:
 
 ```sh
 make release
 ```
 
-The repository CI uses `ps2dev/ps2dev:v2.0.0`. The instrumented security backend is built from the pinned PS2SDK security commit recorded by the experiment documentation.
+CI uses `ps2dev/ps2dev:v2.0.0` and an explicitly pinned PS2SDK security revision for the instrumented backend.
 
-## PS2SDK basis
-
-The implementation is based on public PS2SDK `libsecr` / `secrman` behavior and embeds the required PS2SDK IOP modules in the ELF so results do not depend on the launcher's module set.
-
-Timing or subtle state claims are not considered final until reproduced on real hardware. PCSX2 remains useful for correctness and inspection, not as the sole authority for MechaCon/MagicGate state behavior.
+PCSX2 is useful for correctness/inspection, but state claims in this project are considered final only after real-hardware reproduction.
