@@ -28,6 +28,7 @@ Research records:
 - [`docs/ICVPS2_RESEARCH_RECORD.md`](docs/ICVPS2_RESEARCH_RECORD.md) - original full experiment timeline through Candidate C preparation;
 - [`docs/CANDIDATE_C_HARDWARE_RESULTS.md`](docs/CANDIDATE_C_HARDWARE_RESULTS.md) - exact nine-run Candidate C dataset;
 - [`docs/CANDIDATE_D_HARDWARE_RESULTS.md`](docs/CANDIDATE_D_HARDWARE_RESULTS.md) - exact three-card A/B/A/B result and direct NONSONY state/context proof;
+- [`evidence/candidate-d/manifest.json`](evidence/candidate-d/manifest.json) - machine-readable Candidate D run mapping, hashes, ports and F2 vectors;
 - [`docs/ICVPS2_EXPERIMENT.md`](docs/ICVPS2_EXPERIMENT.md) - ICV-enabled KELF reconstruction;
 - [`docs/SECR_TRACE_DEV7.md`](docs/SECR_TRACE_DEV7.md) - first one-pass pre-card trace.
 
