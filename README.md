@@ -2,7 +2,7 @@
 
 Developer-oriented PlayStation 2 homebrew for probing the MechaCon / MagicGate KELF download path and collecting reproducible ICVPS2 evidence.
 
-The project started with a basic question: **what does MechaCon return for SCMD `0x98`, and what inputs or session state make that value change?** It has progressed into direct real-hardware observation of session-wrapped Kbit/Kc, stock card-side F2 binding and transaction-variable ICVPS2.
+The project started with a basic question: **what does MechaCon return for SCMD `0x98`, and what inputs or session state make that value change?** It has progressed into direct real-hardware observation of session-wrapped Kbit/Kc, stock card-side F2 binding, card-implementation differences and transaction-variable ICVPS2.
 
 ## Current hardware-validated status
 
@@ -16,16 +16,18 @@ The following are confirmed on real retail PS2 hardware:
 - MechaCon pre-card material returned by `0x94..0x97` changes between cold boots;
 - dev.10 directly traces all four stock `F2/50 -> F2/51 -> F2/52 -> F2/53` operations without replay;
 - Candidate C, with four distinct plaintext content-key halves, completed 9/9 real-hardware runs across two Sony 8 MB cards and one unbranded 64 MB MagicGate-capable card;
-- in all nine Candidate-C runs the four pre-card values changed with the transaction while each corresponding F2 output stayed stable for a fixed physical card;
-- changing the physical card changes the stable card-bound mapping for every tested plaintext block;
-- the two Sony cards behave consistently with stateless repeated-plaintext wrapping in the existing Candidate-A evidence, while the unbranded 64 MB card showed four different stable outputs for four identical Candidate-A plaintext positions, motivating a dedicated A/B/A/B position/state test;
-- mc0/mc1 does not change final card-bound Kbit/Kc once the correct physical SIO2 channel is selected;
+- in all nine Candidate-C runs the pre-card values changed with the transaction while each corresponding final F2 output stayed stable for a fixed physical card/position;
+- Candidate D repeats plaintexts as `A/B/A/B` and completed one successful run on each of the same three cards;
+- on both Sony cards Candidate D gives byte-identical F2 outputs when a plaintext is repeated in Kbit and Kc, and plaintext `fedcba9876543210` reproduces the exact Candidate-C card-bound output across a different session and different KELF position;
+- on the unbranded 64 MB card Candidate D supplies byte-identical repeated F2 inputs inside one transaction but receives different outputs at the Kbit and Kc positions, directly proving hidden card-side context/state dependence behind the F2 boundary;
+- mc0/mc1 does not change final Sony card-bound Kbit/Kc once the correct physical SIO2 channel is selected;
 - injecting a second full `SecrAuthCard` or forcing MCMAN's `F3` reset-auth path changes the security state and is not part of the controlled KELF-binding experiment.
 
 Research records:
 
-- [`docs/ICVPS2_RESEARCH_RECORD.md`](docs/ICVPS2_RESEARCH_RECORD.md) - full experiment timeline through Candidate C preparation;
-- [`docs/CANDIDATE_C_HARDWARE_RESULTS.md`](docs/CANDIDATE_C_HARDWARE_RESULTS.md) - exact nine-run Candidate C dataset and next hypotheses;
+- [`docs/ICVPS2_RESEARCH_RECORD.md`](docs/ICVPS2_RESEARCH_RECORD.md) - original full experiment timeline through Candidate C preparation;
+- [`docs/CANDIDATE_C_HARDWARE_RESULTS.md`](docs/CANDIDATE_C_HARDWARE_RESULTS.md) - exact nine-run Candidate C dataset;
+- [`docs/CANDIDATE_D_HARDWARE_RESULTS.md`](docs/CANDIDATE_D_HARDWARE_RESULTS.md) - exact three-card A/B/A/B result and direct NONSONY state/context proof;
 - [`docs/ICVPS2_EXPERIMENT.md`](docs/ICVPS2_EXPERIMENT.md) - ICV-enabled KELF reconstruction;
 - [`docs/SECR_TRACE_DEV7.md`](docs/SECR_TRACE_DEV7.md) - first one-pass pre-card trace.
 
@@ -33,7 +35,7 @@ Research records:
 
 Public `ps3mca_tool` source models each plaintext Kbit/Kc half as encrypted under the active MagicGate SessionKey before card binding. Its F2 implementation describes the card as removing session-key wrapping and re-encrypting the content key with card storage-key material.
 
-The probe's real-hardware observations are consistent with that boundary:
+For the two tested Sony cards, the probe's real-hardware observations are consistent with that boundary:
 
 ```text
 plaintext Kbit/Kc half
@@ -50,6 +52,14 @@ stock F2/50 -> 51 -> 52 -> 53
         v
 stable card-bound value for the physical card/plaintext
 ```
+
+Candidate D demonstrates that the third-party 64 MB card cannot be described by the same simple external mapping alone. With an identical F2 input and identical visible F2 command sequence, it returns different results at different points in the transaction. A descriptive model therefore needs hidden card-side state/context:
+
+```text
+F2_output = G(card_internal_state_or_context, pre_card_input)
+```
+
+This does not yet distinguish a fixed position-specific transform from sequential state/history inside the third-party card.
 
 ICVPS2 is returned in parallel from normal SCMD `0x98` and remains transaction-variable in the collected datasets. Its exact dependency is not yet reconstructed.
 
@@ -152,7 +162,7 @@ Candidate C is hardware-validated across all three test cards.
 
 ### Candidate D
 
-Next card-side discrimination vector deliberately repeats plaintexts by position:
+A/B/A/B position/state discrimination vector:
 
 ```text
 A = 0123456789abcdef
@@ -162,7 +172,7 @@ Kc   = A || B
 SHA-256 = 437ab24cf29476d372071af60b9de0d86ae15d8f67fc0ee4061c19fa46b50670
 ```
 
-It tests whether identical plaintexts within one session yield identical final F2 outputs independent of Kbit/Kc position, especially on the unbranded 64 MB card.
+Candidate D is hardware-validated with one successful run on each test card. It confirms simple repeated-plaintext behavior for both Sony cards and directly proves hidden F2 state/context dependence on the unbranded 64 MB card.
 
 The reproducible vector generator is:
 
