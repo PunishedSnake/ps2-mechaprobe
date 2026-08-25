@@ -91,48 +91,22 @@ static void show_probe_result(int memory_card_port, const probe_result_t *result
              secr_trace_summary());
 
     ui_message(result->code == 0 ? "Probe complete" : "Probe failed",
-               result->code == 0 ? "Evidence + passive MCMAN auth trace written to USB"
+               result->code == 0 ? "Evidence + passive F2/50-53 trace written to USB"
                                  : "Failure evidence was preserved when possible",
                body, "X Return", tone);
     ui_wait_cross();
 }
 
-static int prepare_memory_card_session(int memory_card_port,
-                                       int *type_out, int *format_out)
-{
-    int type = 0;
-    int free_clusters = 0;
-    int format = 0;
-    int result = -99;
-    int request;
-
-    request = mcGetInfo(memory_card_port, 0, &type, &free_clusters, &format);
-    if (request < 0)
-        return request;
-    if (mcSync(0, NULL, &result) < 0)
-        return -98;
-
-    if (type_out != NULL)
-        *type_out = type;
-    if (format_out != NULL)
-        *format_out = format;
-    return result;
-}
-
 static void run_probe(int memory_card_port, probe_mode_t mode)
 {
     probe_result_t result;
-    char body[960];
-    char auth_error[640];
+    char body[920];
     const char *detail;
-    int mc_result;
-    int mc_type = 0;
-    int mc_format = 0;
 
     if (mode == PROBE_MODE_NATIVE_CONTROL) {
-        detail = "dev.9 first asks MCMAN to probe mc via mcGetInfo. MCMAN performs its own normal SecrAuthCard; instrumented SECRMAN only records that existing handshake, then Candidate A runs unchanged.";
+        detail = "dev.10 preserves the hardware-successful dev.7 path. It issues no mcGetInfo/F3 reset and no explicit SecrAuthCard. The stock KELF transaction is observed only around its four F2/50-53 card_encrypt calls.";
     } else if (mode == PROBE_MODE_NATIVE_ICV_READ) {
-        detail = "Legacy forced ICV comparison. The same normal MCMAN probe is performed first.";
+        detail = "Legacy forced ICV comparison. No MCMAN probe is injected before the KELF transaction.";
     } else {
         detail = "Forced-flag replay: historical RUN0001 reproduction only.";
     }
@@ -144,29 +118,10 @@ static void run_probe(int memory_card_port, probe_mode_t mode)
              "%s\n\n"
              "Do not remove the memory card or USB device during the probe.",
              PROBE_INPUT_PATH, memory_card_port, probe_mode_name(mode), detail);
-    ui_message("Running KELF probe", "MCMAN-authenticated session + MechaCon transaction",
+    ui_message("Running KELF probe", "Native MechaCon + F2 CardAuth transaction",
                body, NULL, UI_TONE_WARNING);
 
     secr_trace_reset();
-
-    /* This is intentionally the normal public libmc path. The first mcGetInfo
-       after the IOP reset/probe causes MCMAN to authenticate the PS2 card via
-       its own SecrAuthCard(port + 2, ...). We trace that handshake passively. */
-    mc_result = prepare_memory_card_session(memory_card_port, &mc_type, &mc_format);
-    if (mc_result < -2) {
-        snprintf(auth_error, sizeof(auth_error),
-                 "MCMAN could not prepare mc%d slot 0.\n\n"
-                 "mcGetInfo/mcSync result: %d\n"
-                 "card type: %d\n"
-                 "format: %d\n\n"
-                 "No KELF transaction was attempted.",
-                 memory_card_port, mc_result, mc_type, mc_format);
-        ui_message("Memory-card probe failed", "Normal MCMAN authentication did not complete",
-                   auth_error, "X Return", UI_TONE_DANGER);
-        ui_wait_cross();
-        return;
-    }
-
     probe_run(memory_card_port, mode, &result);
     if (result.run_dir[0] != '\0')
         secr_trace_save(result.run_dir);
@@ -176,14 +131,16 @@ static void run_probe(int memory_card_port, probe_mode_t mode)
 static void show_experiment_notes(void)
 {
     ui_message(
-        "Experiment protocol", "dev.9 | passive MCMAN MagicGate session capture",
+        "Experiment protocol", "dev.10 | native F2/50-53 transform capture",
         "Candidate A remains the validated ICVPS2 KELF.\n\n"
-        "dev.8 failed because it started a second SecrAuthCard after MCMAN had\n"
-        "already authenticated the card. dev.9 does not do that. It triggers the\n"
-        "normal MCMAN card probe with mcGetInfo/mcSync and passively records the\n"
-        "SecrAuthCard handshake MCMAN already performs. Candidate A then uses\n"
-        "that same session for pre-Kbit/pre-Kc, final keys and ICV.\n\n"
-        "Cold-boot between runs and keep the physical card unchanged.",
+        "dev.9 showed that forcing mcGetInfo can enter MCMAN reset-auth (F3) and\n"
+        "leave a warm-boot-visible security state. dev.10 removes that probe.\n"
+        "The successful dev.7 transaction order is restored exactly.\n\n"
+        "For Kbit and Kc, each stock card_encrypt half records input bytes,\n"
+        "F2/50-53 success mask and F2/53 output. No command is replayed.\n\n"
+        "Use Return to PS2 Browser when finished; dev.10 resets the IOP back to\n"
+        "the ROM environment before ExecOSD so the custom security stack is not\n"
+        "carried into a warm Browser return.",
         "X Return", UI_TONE_INFO);
     ui_wait_cross();
 }
@@ -191,14 +148,14 @@ static void show_experiment_notes(void)
 int main(void)
 {
     static const ui_menu_item_t menu[] = {
-        {"MCMAN auth + native trace - mc0", "Normal card probe; passive auth capture; Candidate-A KELF", 1},
-        {"MCMAN auth + native trace - mc1", "Same experiment through memory-card port 1", 1},
+        {"Native F2 trace - mc0", "Validated Candidate-A path; passive F2/50-53 capture", 1},
+        {"Native F2 trace - mc1", "Same native transaction through memory-card port 1", 1},
         {"Native + one ICV read - mc0", "Legacy forced-read comparison", 1},
         {"Native + one ICV read - mc1", "Legacy forced-read comparison on mc1", 1},
         {"Forced ICV flag replay - mc0", "Historical RUN0001 reproduction only", 1},
         {"Console / MechaCon info", "ROMVER, raw model response, sceCdMV and RTC evidence", 1},
-        {"Experiment protocol", "dev.9 passive MCMAN-auth capture notes", 1},
-        {"Return to PS2 Browser", "Leave Mecha Probe through ExecOSD", 1}
+        {"Experiment protocol", "dev.10 native F2 trace and safe-exit notes", 1},
+        {"Return to PS2 Browser", "Restore ROM IOP state, then leave through ExecOSD", 1}
     };
     unsigned int selection = 0;
     int result;
@@ -224,7 +181,7 @@ int main(void)
         fatal_startup("libcdvd could not initialize the CDVD/MechaCon RPC path.", -20);
 
     ui_message("Initializing", "Binding memory-card RPC",
-               "Initializing the EE libmc client exactly as the FreeMcBoot signing path does.",
+               "Initializing the EE libmc client without probing/resetting card auth state.",
                NULL, UI_TONE_INFO);
     result = mcInit(MC_TYPE_XMC);
     if (result < 0)
@@ -243,7 +200,7 @@ int main(void)
     for (;;) {
         int choice = ui_menu_select(
             "DriveForge Mecha Probe",
-            "dev.9 | passive MCMAN auth + 0x94..0x98 trace",
+            "dev.10 | native F2/50-53 trace",
             menu, sizeof(menu) / sizeof(menu[0]), &selection);
 
         if (choice < 0 || choice == 7) {
