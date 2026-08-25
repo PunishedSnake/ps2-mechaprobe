@@ -27,7 +27,6 @@ ROOT = pathlib.Path(sys.argv[1])
 SECRMAN = ROOT / "src" / "secrman.c"
 PREKEY_RELATIVE_OFFSET = 0xF8   # kbit/kc field starts at RPC base + 8 => base + 0x100
 F2TRACE_RELATIVE_OFFSET = 0x118 # kbit/kc field starts at RPC base + 8 => base + 0x120
-F2TRACE_SIZE = 56
 
 
 def find_function(text: str, signature_start: str):
@@ -48,8 +47,31 @@ def find_function(text: str, signature_start: str):
     raise SystemExit(f"unterminated function: {signature_start}")
 
 
+def find_definition(text: str, signature_start: str):
+    """Find an actual definition, never a forward declaration/prototype."""
+    needle = signature_start + "\n{"
+    start = text.find(needle)
+    if start < 0:
+        raise SystemExit(f"missing function definition: {signature_start}")
+    brace = start + len(signature_start) + 1
+    depth = 0
+    for i in range(brace, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return start, i + 1
+    raise SystemExit(f"unterminated function definition: {signature_start}")
+
+
 def replace_function(text: str, signature_start: str, replacement: str):
     start, end = find_function(text, signature_start)
+    return text[:start] + replacement + text[end:]
+
+
+def replace_definition(text: str, signature_start: str, replacement: str):
+    start, end = find_definition(text, signature_start)
     return text[:start] + replacement + text[end:]
 
 
@@ -219,7 +241,7 @@ end:
     return result;
 }}'''
 
-text = replace_function(text, "static int card_encrypt(", new_card_encrypt)
+text = replace_definition(text, "static int card_encrypt(int port, int slot, void *buffer)", new_card_encrypt)
 text = replace_function(text, "int SecrDownloadGetKbit(", new_kbit)
 text = replace_function(text, "int SecrDownloadGetKc(", new_kc)
 
