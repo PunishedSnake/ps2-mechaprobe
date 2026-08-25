@@ -1,22 +1,23 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Instrument pinned PS2SDK SECRMAN 1.4 for dev.9 passive auth/session tracing.
+"""Instrument pinned PS2SDK SECRMAN 1.4 for dev.10 F2/50-53 tracing.
 
-Important: this patch does NOT start a second SecrAuthCard transaction from the KELF
-path. MCMAN already authenticates a PS2 memory card during its normal card probe.
-dev.9 passively records that stock MCMAN -> SecrAuthCard handshake, then preserves
-it until the subsequent Candidate-A KELF transaction reaches ICVPS2.
+This deliberately restores the hardware-successful dev.7 transaction semantics:
+- no mcGetInfo probe is required by the experiment,
+- no F3 auth reset is issued by the probe,
+- no extra SecrAuthCard is started,
+- no MechaCon or card command is replayed.
 
-Captured without replaying commands:
-- CardIV, CardMaterial and CardNonce
-- MechaChallenge1/2/3
-- CardResponse1/2/3
-- raw pre-CardAuth 0x94/0x95 Kbit and 0x96/0x97 Kc
-- normal final Kbit/Kc and ICVPS2
+Observability is added only around the four stock card_encrypt() calls used by
+SecrDownloadGetKbit() and SecrDownloadGetKc(). For each 8-byte half we record:
+- physical SECR port and slot,
+- input bytes supplied to F2/51,
+- success of F2/50, F2/51, F2/52 and F2/53,
+- output bytes returned by F2/53.
 
-The 72-byte auth transcript plus an 8-byte header is copied to unused offset 0x100
-of the final ICVPS2 RPC reply. Kbit/Kc pre-values continue to use offset 0x100 of
-their independent 0x1000-byte RPC replies.
+The existing dev.7 raw pre-Kbit/pre-Kc capture remains at response offset 0x100.
+A compact 56-byte F2 trace block is copied to unused response offset 0x120.
+The normal RPC structures and KELF transaction remain otherwise unchanged.
 """
 
 import pathlib
@@ -24,8 +25,9 @@ import sys
 
 ROOT = pathlib.Path(sys.argv[1])
 SECRMAN = ROOT / "src" / "secrman.c"
-TRACE_RELATIVE_OFFSET = 0xF8
-AUTH_RELATIVE_OFFSET = 0x100
+PREKEY_RELATIVE_OFFSET = 0xF8   # kbit/kc field starts at RPC base + 8 => base + 0x100
+F2TRACE_RELATIVE_OFFSET = 0x118 # kbit/kc field starts at RPC base + 8 => base + 0x120
+F2TRACE_SIZE = 56
 
 
 def find_function(text: str, signature_start: str):
@@ -56,107 +58,170 @@ text = SECRMAN.read_text()
 marker = "extern struct irx_export_table _exp_secrman;\n"
 if marker not in text:
     raise SystemExit("missing SECRMAN export marker")
-text = text.replace(marker, marker + r'''
 
-/* dev.9 passive capture of the normal MCMAN-initiated card authentication. */
-static unsigned char MgTraceAuth[80];
-static int MgTraceAuthValid;
+helpers = r'''
 
-static void MgTraceResetAuth(void)
+/* dev.10 passive F2/50-53 trace. Wire format is intentionally byte-based so
+   the EE parser does not depend on IOP structure padding. */
+#define MG_F2_TRACE_SIZE 56
+#define MG_F2_RECORD_SIZE 24
+static unsigned char MgF2Trace[MG_F2_TRACE_SIZE];
+
+static void MgF2TraceReset(unsigned char kind)
 {
-    memset(MgTraceAuth, 0, sizeof(MgTraceAuth));
-    MgTraceAuth[0] = 0x4d; /* M */
-    MgTraceAuth[1] = 0x47; /* G */
-    MgTraceAuth[2] = 0x41; /* A */
-    MgTraceAuth[3] = 0x39; /* 9 */
-    MgTraceAuthValid = 0;
+    memset(MgF2Trace, 0, sizeof(MgF2Trace));
+    MgF2Trace[0] = 'M';
+    MgF2Trace[1] = 'G';
+    MgF2Trace[2] = 'F';
+    MgF2Trace[3] = '2';
+    MgF2Trace[4] = 1;       /* trace format version */
+    MgF2Trace[5] = 0;       /* record count */
+    MgF2Trace[6] = kind;    /* 'K' = Kbit, 'C' = Kc */
 }
-''', 1)
 
-# Instrument the stock SecrAuthCard used by MCMAN. Reset at the start of the
-# real authentication and capture only after the complete handshake succeeds.
-start, end = find_function(text, "int SecrAuthCard(")
-auth = text[start:end]
-first_check = "\n\n    if (GetMcCommandHandler() == NULL) {"
-if first_check not in auth:
-    raise SystemExit("SecrAuthCard first-check marker not found")
-auth = auth.replace(first_check,
-                    "\n\n    MgTraceResetAuth();\n" + first_check[1:], 1)
+static int MgF2TraceBegin(int port, int slot, const void *input)
+{
+    int index;
+    unsigned char *record;
 
-success_marker = "    return 1;\n\nError2_end:"
-if success_marker not in auth:
-    raise SystemExit("SecrAuthCard success marker not found")
-capture = r'''    /* This is the exact successful authentication performed by MCMAN. */
-    MgTraceAuth[4] = 1;
-    MgTraceAuth[5] = (unsigned char)cnum;
-    MgTraceAuth[6] = (unsigned char)port;
-    MgTraceAuth[7] = (unsigned char)slot;
-    memcpy(&MgTraceAuth[8],  CardIV, 8);
-    memcpy(&MgTraceAuth[16], CardMaterial, 8);
-    memcpy(&MgTraceAuth[24], CardNonce, 8);
-    memcpy(&MgTraceAuth[32], MechaChallenge1, 8);
-    memcpy(&MgTraceAuth[40], MechaChallenge2, 8);
-    memcpy(&MgTraceAuth[48], MechaChallenge3, 8);
-    memcpy(&MgTraceAuth[56], CardResponse1, 8);
-    memcpy(&MgTraceAuth[64], CardResponse2, 8);
-    memcpy(&MgTraceAuth[72], CardResponse3, 8);
-    MgTraceAuthValid = 1;
+    index = MgF2Trace[5];
+    if (index >= 2)
+        return -1;
+
+    MgF2Trace[5] = (unsigned char)(index + 1);
+    record = &MgF2Trace[8 + index * MG_F2_RECORD_SIZE];
+    memset(record, 0, MG_F2_RECORD_SIZE);
+    record[0] = (unsigned char)port;
+    record[1] = (unsigned char)slot;
+    record[2] = 0;          /* successful-step bitmap: 50,51,52,53 */
+    record[3] = 0xff;       /* failed command, 0 on complete success */
+    memcpy(&record[4], input, 8);
+    return index;
+}
+
+static void MgF2TraceStep(int index, unsigned char bit, unsigned char command, int success)
+{
+    unsigned char *record;
+
+    if (index < 0 || index >= 2)
+        return;
+    record = &MgF2Trace[8 + index * MG_F2_RECORD_SIZE];
+    if (success)
+        record[2] |= bit;
+    else
+        record[3] = command;
+}
+
+static void MgF2TraceFinish(int index, const void *output)
+{
+    unsigned char *record;
+
+    if (index < 0 || index >= 2)
+        return;
+    record = &MgF2Trace[8 + index * MG_F2_RECORD_SIZE];
+    memcpy(&record[12], output, 8);
+    if ((record[2] & 0x0f) == 0x0f)
+        record[3] = 0;
+}
+
+static void MgF2TraceCopy(void *dest)
+{
+    memcpy(dest, MgF2Trace, sizeof(MgF2Trace));
+}
+'''
+
+text = text.replace(marker, marker + helpers, 1)
+
+new_card_encrypt = r'''static int card_encrypt(int port, int slot, void *buffer)
+{
+    int trace_index;
+
+    trace_index = MgF2TraceBegin(port, slot, buffer);
+
+    if (GetMcCommandHandler() == NULL) {
+        MgF2TraceStep(trace_index, 0, 0xfe, 0);
+        return 0;
+    }
+
+    if (card_auth(port, slot, 0xF2, 0x50) == 0) {
+        MgF2TraceStep(trace_index, 0x01, 0x50, 0);
+        return 0;
+    }
+    MgF2TraceStep(trace_index, 0x01, 0x50, 1);
+
+    if (card_auth_write(port, slot, buffer, 0xF2, 0x51) == 0) {
+        MgF2TraceStep(trace_index, 0x02, 0x51, 0);
+        return 0;
+    }
+    MgF2TraceStep(trace_index, 0x02, 0x51, 1);
+
+    if (card_auth(port, slot, 0xF2, 0x52) == 0) {
+        MgF2TraceStep(trace_index, 0x04, 0x52, 0);
+        return 0;
+    }
+    MgF2TraceStep(trace_index, 0x04, 0x52, 1);
+
+    if (card_auth_read(port, slot, buffer, 0xF2, 0x53) == 0) {
+        MgF2TraceStep(trace_index, 0x08, 0x53, 0);
+        return 0;
+    }
+    MgF2TraceStep(trace_index, 0x08, 0x53, 1);
+    MgF2TraceFinish(trace_index, buffer);
 
     return 1;
-
-Error2_end:'''
-auth = auth.replace(success_marker, capture, 1)
-text = text[:start] + auth + text[end:]
+}'''
 
 new_kbit = f'''int SecrDownloadGetKbit(int port, int slot, void *kbit)
 {{
-    if (scePreEncryptKbit(kbit) == 0) {{
-        return 0;
-    }}
+    int result;
 
-    memcpy((void *)((unsigned char *)kbit + 0x{TRACE_RELATIVE_OFFSET:02x}), kbit, 16);
+    result = 0;
+    MgF2TraceReset('K');
 
-    if (card_encrypt(port, slot, kbit) == 0) {{
-        return 0;
-    }}
-    if (card_encrypt(port, slot, (void *)((unsigned char *)kbit + 8)) == 0) {{
-        return 0;
-    }}
-    return 1;
+    if (scePreEncryptKbit(kbit) == 0)
+        goto end;
+
+    memcpy((void *)((unsigned char *)kbit + 0x{PREKEY_RELATIVE_OFFSET:03x}), kbit, 16);
+
+    if (card_encrypt(port, slot, kbit) == 0)
+        goto end;
+    if (card_encrypt(port, slot, (void *)((unsigned char *)kbit + 8)) == 0)
+        goto end;
+
+    result = 1;
+
+end:
+    MgF2TraceCopy((void *)((unsigned char *)kbit + 0x{F2TRACE_RELATIVE_OFFSET:03x}));
+    return result;
 }}'''
 
 new_kc = f'''int SecrDownloadGetKc(int port, int slot, void *kc)
 {{
-    if (scePreEncryptKc(kc) == 0) {{
-        return 0;
-    }}
+    int result;
 
-    memcpy((void *)((unsigned char *)kc + 0x{TRACE_RELATIVE_OFFSET:02x}), kc, 16);
+    result = 0;
+    MgF2TraceReset('C');
 
-    if (card_encrypt(port, slot, kc) == 0) {{
-        return 0;
-    }}
-    if (card_encrypt(port, slot, (void *)((unsigned char *)kc + 8)) == 0) {{
-        return 0;
-    }}
-    return 1;
+    if (scePreEncryptKc(kc) == 0)
+        goto end;
+
+    memcpy((void *)((unsigned char *)kc + 0x{PREKEY_RELATIVE_OFFSET:03x}), kc, 16);
+
+    if (card_encrypt(port, slot, kc) == 0)
+        goto end;
+    if (card_encrypt(port, slot, (void *)((unsigned char *)kc + 8)) == 0)
+        goto end;
+
+    result = 1;
+
+end:
+    MgF2TraceCopy((void *)((unsigned char *)kc + 0x{F2TRACE_RELATIVE_OFFSET:03x}));
+    return result;
 }}'''
 
-new_icv = f'''int SecrDownloadGetICVPS2(void *icvps2)
-{{
-    if (func_00000d14(icvps2) == 0) {{
-        return 0;
-    }}
-
-    if (MgTraceAuthValid)
-        memcpy((void *)((unsigned char *)icvps2 + 0x{AUTH_RELATIVE_OFFSET:03x}), MgTraceAuth, sizeof(MgTraceAuth));
-
-    return 1;
-}}'''
-
+text = replace_function(text, "static int card_encrypt(", new_card_encrypt)
 text = replace_function(text, "int SecrDownloadGetKbit(", new_kbit)
 text = replace_function(text, "int SecrDownloadGetKc(", new_kc)
-text = replace_function(text, "int SecrDownloadGetICVPS2(", new_icv)
-SECRMAN.write_text(text)
 
-print("PS2SDK SECRMAN 1.4 dev.9 passive MCMAN-auth/session instrumentation applied")
+SECRMAN.write_text(text)
+print("PS2SDK SECRMAN 1.4 dev.10 passive F2/50-53 instrumentation applied")
