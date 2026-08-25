@@ -20,6 +20,8 @@ The following are confirmed on real retail PS2 hardware:
 - Candidate D repeats plaintexts as `A/B/A/B` and completed one successful run on each of the same three cards;
 - on both Sony cards Candidate D gives byte-identical F2 outputs when a plaintext is repeated in Kbit and Kc, and plaintext `fedcba9876543210` reproduces the exact Candidate-C card-bound output across a different session and different KELF position;
 - on the unbranded 64 MB card Candidate D supplies byte-identical repeated F2 inputs inside one transaction but receives different outputs at the Kbit and Kc positions, directly proving hidden card-side context/state dependence behind the F2 boundary;
+- dev.11 passively watched for a naturally successful full `SecrAuthCard()` after the probe's own IOP reset/module load; the first real-hardware Candidate-C run completed normally with `auth_trace_present=false`, proving that no newly observed full `SecrAuthCard()` is required inside that post-reset instrumented IOP window for the successful `0x94..0x98` + F2 transaction;
+- the dev.11 result places the active session/auth state earlier than the observed post-reset SECRMAN window, although the exact earlier creator and storage location remain unproven;
 - mc0/mc1 does not change final Sony card-bound Kbit/Kc once the correct physical SIO2 channel is selected;
 - injecting a second full `SecrAuthCard` or forcing MCMAN's `F3` reset-auth path changes the security state and is not part of the controlled KELF-binding experiment.
 
@@ -29,6 +31,8 @@ Research records:
 - [`docs/CANDIDATE_C_HARDWARE_RESULTS.md`](docs/CANDIDATE_C_HARDWARE_RESULTS.md) - exact nine-run Candidate C dataset;
 - [`docs/CANDIDATE_D_HARDWARE_RESULTS.md`](docs/CANDIDATE_D_HARDWARE_RESULTS.md) - exact three-card A/B/A/B result and direct NONSONY state/context proof;
 - [`evidence/candidate-d/manifest.json`](evidence/candidate-d/manifest.json) - machine-readable Candidate D run mapping, hashes, ports and F2 vectors;
+- [`docs/DEV11_PASSIVE_AUTH_RESULTS.md`](docs/DEV11_PASSIVE_AUTH_RESULTS.md) - first passive-auth hardware result and session-lifetime inference;
+- [`evidence/dev11-run0002/manifest.json`](evidence/dev11-run0002/manifest.json) - machine-readable dev.11 Candidate-C/F2/ICV evidence;
 - [`docs/ICVPS2_EXPERIMENT.md`](docs/ICVPS2_EXPERIMENT.md) - ICV-enabled KELF reconstruction;
 - [`docs/SECR_TRACE_DEV7.md`](docs/SECR_TRACE_DEV7.md) - first one-pass pre-card trace.
 
@@ -61,6 +65,8 @@ F2_output = G(card_internal_state_or_context, pre_card_input)
 ```
 
 This does not yet distinguish a fixed position-specific transform from sequential state/history inside the third-party card.
+
+Dev.11 adds a lifetime constraint to the session model. A complete Candidate-C transaction succeeded after the probe reset the IOP and loaded the instrumented SECRMAN, but that SECRMAN observed no successful full `SecrAuthCard()` before `0x94..0x98` were used. The simplest current explanation is that the relevant session/auth state predates this instrumented window and survives the IOP reset outside ordinary IOP RAM. Which earlier boot/auth step created that state remains a test hypothesis rather than a confirmed claim.
 
 ICVPS2 is returned in parallel from normal SCMD `0x98` and remains transaction-variable in the collected datasets. Its exact dependency is not yet reconstructed.
 
@@ -131,7 +137,9 @@ Dev.11 additionally passively reports whether the instrumented SECRMAN observed 
 auth-trace-status.txt
 ```
 
-If present, the full transcript is also exported as `auth-trace.bin` plus CardIV/CardMaterial/CardNonce, MechaChallenge1..3 and CardResponse1..3 files.
+The first real-hardware dev.11 run returned `auth_trace_present=false` while the complete Candidate-C transaction still succeeded. Therefore absence of an auth transcript is a valid and informative result rather than a probe failure.
+
+If a future run observes one, the full transcript is also exported as `auth-trace.bin` plus CardIV/CardMaterial/CardNonce, MechaChallenge1..3 and CardResponse1..3 files.
 
 ## Validated / controlled KELF vectors
 
@@ -159,7 +167,7 @@ Kc1   = 0f1e2d3c4b5a6978
 SHA-256 = 87de11f092965122ea01bd6e3a908f5876cca0a42aaa49037bd63a39066d056d
 ```
 
-Candidate C is hardware-validated across all three test cards.
+Candidate C is hardware-validated across all three test cards and was also used for the first dev.11 passive-auth test.
 
 ### Candidate D
 
