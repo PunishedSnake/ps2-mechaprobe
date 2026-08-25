@@ -1,12 +1,11 @@
 /* SPDX-License-Identifier: MIT */
 /*
- * Translate libmc-style logical memory-card ports (0/1) to the physical SIO2
- * memory-card channels (2/3) expected by SECRMAN CardAuth.
+ * Translate libmc-style logical memory-card ports (0/1) to physical SIO2
+ * channels (2/3) expected by SECRMAN CardAuth.
  *
- * dev.10 restores the hardware-successful dev.7 transaction semantics and adds
- * passive observability only around the stock F2/50-53 card_encrypt operations.
- * No mcGetInfo/F3 reset, SecrAuthCard replay, MechaCon replay or extra CardAuth
- * command is issued by this EE shim.
+ * dev.11 preserves dev.10's successful KELF/F2 behavior and additionally reads
+ * the last naturally successful SecrAuthCard transcript if the instrumented
+ * SECRMAN observed one. This EE shim never starts, resets or replays auth.
  */
 
 #define NEWLIB_PORT_AWARE
@@ -23,9 +22,11 @@
 
 #define SECR_PREKEY_RPC_OFFSET 0x100u
 #define SECR_F2_TRACE_RPC_OFFSET 0x120u
+#define SECR_AUTH_TRACE_RPC_OFFSET 0x180u
 #define SECR_TRACE_PATH_SIZE 192u
 #define F2_TRACE_SIZE 56u
 #define F2_RECORD_SIZE 24u
+#define AUTH_TRACE_SIZE 80u
 
 static SifRpcClientData_t *HeaderClient;
 static SifRpcClientData_t *KbitClient;
@@ -39,6 +40,7 @@ static unsigned char FinalKc[16];
 static unsigned char Icvps2[8];
 static unsigned char F2KbitTrace[F2_TRACE_SIZE];
 static unsigned char F2KcTrace[F2_TRACE_SIZE];
+static unsigned char AuthTrace[AUTH_TRACE_SIZE];
 static int HavePreKbit;
 static int HavePreKc;
 static int HaveFinalKbit;
@@ -46,7 +48,8 @@ static int HaveFinalKc;
 static int HaveIcvps2;
 static int HaveF2KbitTrace;
 static int HaveF2KcTrace;
-static char Summary[448];
+static int HaveAuthTrace;
+static char Summary[512];
 
 int __real_sceSifBindRpc(SifRpcClientData_t *cd, int sid, int mode);
 int __real_sceSifCallRpc(SifRpcClientData_t *cd, int fno, int mode,
@@ -77,6 +80,12 @@ static int f2_trace_valid(const unsigned char *trace, unsigned char kind)
     return trace[0] == 'M' && trace[1] == 'G' &&
            trace[2] == 'F' && trace[3] == '2' &&
            trace[4] == 1 && trace[5] <= 2 && trace[6] == kind;
+}
+
+static int auth_trace_valid(const unsigned char *trace)
+{
+    return trace[0] == 'M' && trace[1] == 'G' &&
+           trace[2] == 'A' && trace[3] == '1' && trace[4] == 1;
 }
 
 static const unsigned char *f2_record(const unsigned char *trace, unsigned int index)
@@ -113,9 +122,10 @@ void secr_trace_reset(void)
     memset(Icvps2, 0, sizeof(Icvps2));
     memset(F2KbitTrace, 0, sizeof(F2KbitTrace));
     memset(F2KcTrace, 0, sizeof(F2KcTrace));
+    memset(AuthTrace, 0, sizeof(AuthTrace));
     HavePreKbit = HavePreKc = 0;
     HaveFinalKbit = HaveFinalKc = HaveIcvps2 = 0;
-    HaveF2KbitTrace = HaveF2KcTrace = 0;
+    HaveF2KbitTrace = HaveF2KcTrace = HaveAuthTrace = 0;
     Summary[0] = '\0';
 }
 
@@ -129,7 +139,8 @@ const char *secr_trace_summary(void)
     bytes_to_hex(FinalKc, 16, d);
     bytes_to_hex(Icvps2, 8, e);
     snprintf(Summary, sizeof(Summary),
-             "f2K=%u f2C=%u preKbit=%s preKc=%s finalKbit=%s finalKc=%s icv=%s",
+             "auth=%s f2K=%u f2C=%u preKbit=%s preKc=%s finalKbit=%s finalKc=%s icv=%s",
+             HaveAuthTrace ? "yes" : "no",
              HaveF2KbitTrace ? (unsigned int)F2KbitTrace[5] : 0u,
              HaveF2KcTrace ? (unsigned int)F2KcTrace[5] : 0u,
              HavePreKbit ? a : "n/a", HavePreKc ? b : "n/a",
@@ -142,7 +153,6 @@ static int save_named(const char *run_dir, const char *name,
                       const void *data, unsigned int size)
 {
     char path[SECR_TRACE_PATH_SIZE];
-
     snprintf(path, sizeof(path), "%s/%s", run_dir, name);
     return write_whole_file(path, data, size);
 }
@@ -150,15 +160,17 @@ static int save_named(const char *run_dir, const char *name,
 int secr_trace_save(const char *run_dir)
 {
     char path[SECR_TRACE_PATH_SIZE];
-    char text[2400];
+    char text[3600];
     char pre_kbit_hex[33], pre_kc_hex[33];
     char final_kbit_hex[33], final_kc_hex[33], icv_hex[17];
     char k0in[17], k0out[17], k1in[17], k1out[17];
     char c0in[17], c0out[17], c1in[17], c1out[17];
+    char card_iv[17], card_material[17], card_nonce[17];
+    char mc1[17], mc2[17], mc3[17], cr1[17], cr2[17], cr3[17];
     const unsigned char *kr0 = f2_record(F2KbitTrace, 0);
     const unsigned char *kr1 = f2_record(F2KbitTrace, 1);
     const unsigned char *cr0 = f2_record(F2KcTrace, 0);
-    const unsigned char *cr1 = f2_record(F2KcTrace, 1);
+    const unsigned char *cr1r = f2_record(F2KcTrace, 1);
     int first_error = 0;
     int rc;
 
@@ -180,6 +192,7 @@ int secr_trace_save(const char *run_dir)
     SAVE("icvps2-trace.bin", Icvps2, HaveIcvps2, 8);
     SAVE("f2-kbit-trace.bin", F2KbitTrace, HaveF2KbitTrace, F2_TRACE_SIZE);
     SAVE("f2-kc-trace.bin", F2KcTrace, HaveF2KcTrace, F2_TRACE_SIZE);
+    SAVE("auth-trace.bin", AuthTrace, HaveAuthTrace, AUTH_TRACE_SIZE);
 
     SAVE("f2-kbit-half0-input.bin", &kr0[4], HaveF2KbitTrace && F2KbitTrace[5] > 0, 8);
     SAVE("f2-kbit-half0-output.bin", &kr0[12], HaveF2KbitTrace && F2KbitTrace[5] > 0, 8);
@@ -187,8 +200,18 @@ int secr_trace_save(const char *run_dir)
     SAVE("f2-kbit-half1-output.bin", &kr1[12], HaveF2KbitTrace && F2KbitTrace[5] > 1, 8);
     SAVE("f2-kc-half0-input.bin", &cr0[4], HaveF2KcTrace && F2KcTrace[5] > 0, 8);
     SAVE("f2-kc-half0-output.bin", &cr0[12], HaveF2KcTrace && F2KcTrace[5] > 0, 8);
-    SAVE("f2-kc-half1-input.bin", &cr1[4], HaveF2KcTrace && F2KcTrace[5] > 1, 8);
-    SAVE("f2-kc-half1-output.bin", &cr1[12], HaveF2KcTrace && F2KcTrace[5] > 1, 8);
+    SAVE("f2-kc-half1-input.bin", &cr1r[4], HaveF2KcTrace && F2KcTrace[5] > 1, 8);
+    SAVE("f2-kc-half1-output.bin", &cr1r[12], HaveF2KcTrace && F2KcTrace[5] > 1, 8);
+
+    SAVE("card-iv.bin", &AuthTrace[8], HaveAuthTrace, 8);
+    SAVE("card-material.bin", &AuthTrace[16], HaveAuthTrace, 8);
+    SAVE("card-nonce.bin", &AuthTrace[24], HaveAuthTrace, 8);
+    SAVE("mecha-challenge1.bin", &AuthTrace[32], HaveAuthTrace, 8);
+    SAVE("mecha-challenge2.bin", &AuthTrace[40], HaveAuthTrace, 8);
+    SAVE("mecha-challenge3.bin", &AuthTrace[48], HaveAuthTrace, 8);
+    SAVE("card-response1.bin", &AuthTrace[56], HaveAuthTrace, 8);
+    SAVE("card-response2.bin", &AuthTrace[64], HaveAuthTrace, 8);
+    SAVE("card-response3.bin", &AuthTrace[72], HaveAuthTrace, 8);
 #undef SAVE
 
     bytes_to_hex(PreKbit, 16, pre_kbit_hex);
@@ -196,29 +219,46 @@ int secr_trace_save(const char *run_dir)
     bytes_to_hex(FinalKbit, 16, final_kbit_hex);
     bytes_to_hex(FinalKc, 16, final_kc_hex);
     bytes_to_hex(Icvps2, 8, icv_hex);
-    bytes_to_hex(&kr0[4], 8, k0in);
-    bytes_to_hex(&kr0[12], 8, k0out);
-    bytes_to_hex(&kr1[4], 8, k1in);
-    bytes_to_hex(&kr1[12], 8, k1out);
-    bytes_to_hex(&cr0[4], 8, c0in);
-    bytes_to_hex(&cr0[12], 8, c0out);
-    bytes_to_hex(&cr1[4], 8, c1in);
-    bytes_to_hex(&cr1[12], 8, c1out);
+    bytes_to_hex(&kr0[4], 8, k0in); bytes_to_hex(&kr0[12], 8, k0out);
+    bytes_to_hex(&kr1[4], 8, k1in); bytes_to_hex(&kr1[12], 8, k1out);
+    bytes_to_hex(&cr0[4], 8, c0in); bytes_to_hex(&cr0[12], 8, c0out);
+    bytes_to_hex(&cr1r[4], 8, c1in); bytes_to_hex(&cr1r[12], 8, c1out);
+    bytes_to_hex(&AuthTrace[8], 8, card_iv);
+    bytes_to_hex(&AuthTrace[16], 8, card_material);
+    bytes_to_hex(&AuthTrace[24], 8, card_nonce);
+    bytes_to_hex(&AuthTrace[32], 8, mc1);
+    bytes_to_hex(&AuthTrace[40], 8, mc2);
+    bytes_to_hex(&AuthTrace[48], 8, mc3);
+    bytes_to_hex(&AuthTrace[56], 8, cr1);
+    bytes_to_hex(&AuthTrace[64], 8, cr2);
+    bytes_to_hex(&AuthTrace[72], 8, cr3);
 
     snprintf(text, sizeof(text),
-             "PS2 Mecha Probe dev.10 native F2/50-53 trace\n"
+             "PS2 Mecha Probe dev.11 passive F2 + natural-auth trace\n"
              "No mcGetInfo/F3 reset, no explicit SecrAuthCard, no replay.\n\n"
+             "natural successful SecrAuthCard observed: %s\n"
+             "auth cnum/port/slot: %u / %u / %u\n"
+             "CardIV:          %s\nCardMaterial:    %s\nCardNonce:       %s\n"
+             "MechaChallenge1: %s\nMechaChallenge2: %s\nMechaChallenge3: %s\n"
+             "CardResponse1:   %s\nCardResponse2:   %s\nCardResponse3:   %s\n\n"
              "0x94+0x95 pre-Kbit: %s\n"
              "Kbit half0: port=%u slot=%u mask=0x%02x failed=0x%02x in=%s out=%s\n"
              "Kbit half1: port=%u slot=%u mask=0x%02x failed=0x%02x in=%s out=%s\n"
              "final Kbit: %s\n\n"
-             "0x96+0x97 pre-Kc:   %s\n"
-             "Kc half0:   port=%u slot=%u mask=0x%02x failed=0x%02x in=%s out=%s\n"
-             "Kc half1:   port=%u slot=%u mask=0x%02x failed=0x%02x in=%s out=%s\n"
-             "final Kc:   %s\n\n"
-             "0x98 ICVPS2: %s\n\n"
-             "mask bits: bit0=F2/50 bit1=F2/51 bit2=F2/52 bit3=F2/53; 0x0f means the stock four-command transform completed.\n",
-             HavePreKbit ? pre_kbit_hex : "not captured",
+             "0x96+0x97 pre-Kc: %s\n"
+             "Kc half0: port=%u slot=%u mask=0x%02x failed=0x%02x in=%s out=%s\n"
+             "Kc half1: port=%u slot=%u mask=0x%02x failed=0x%02x in=%s out=%s\n"
+             "final Kc: %s\n\n0x98 ICVPS2: %s\n",
+             HaveAuthTrace ? "yes" : "no",
+             HaveAuthTrace ? (unsigned int)AuthTrace[5] : 0u,
+             HaveAuthTrace ? (unsigned int)AuthTrace[6] : 0u,
+             HaveAuthTrace ? (unsigned int)AuthTrace[7] : 0u,
+             HaveAuthTrace ? card_iv : "n/a", HaveAuthTrace ? card_material : "n/a",
+             HaveAuthTrace ? card_nonce : "n/a", HaveAuthTrace ? mc1 : "n/a",
+             HaveAuthTrace ? mc2 : "n/a", HaveAuthTrace ? mc3 : "n/a",
+             HaveAuthTrace ? cr1 : "n/a", HaveAuthTrace ? cr2 : "n/a",
+             HaveAuthTrace ? cr3 : "n/a",
+             HavePreKbit ? pre_kbit_hex : "n/a",
              HaveF2KbitTrace && F2KbitTrace[5] > 0 ? (unsigned int)kr0[0] : 0u,
              HaveF2KbitTrace && F2KbitTrace[5] > 0 ? (unsigned int)kr0[1] : 0u,
              HaveF2KbitTrace && F2KbitTrace[5] > 0 ? (unsigned int)kr0[2] : 0u,
@@ -231,24 +271,29 @@ int secr_trace_save(const char *run_dir)
              HaveF2KbitTrace && F2KbitTrace[5] > 1 ? (unsigned int)kr1[3] : 0xffu,
              HaveF2KbitTrace && F2KbitTrace[5] > 1 ? k1in : "n/a",
              HaveF2KbitTrace && F2KbitTrace[5] > 1 ? k1out : "n/a",
-             HaveFinalKbit ? final_kbit_hex : "not captured",
-             HavePreKc ? pre_kc_hex : "not captured",
+             HaveFinalKbit ? final_kbit_hex : "n/a",
+             HavePreKc ? pre_kc_hex : "n/a",
              HaveF2KcTrace && F2KcTrace[5] > 0 ? (unsigned int)cr0[0] : 0u,
              HaveF2KcTrace && F2KcTrace[5] > 0 ? (unsigned int)cr0[1] : 0u,
              HaveF2KcTrace && F2KcTrace[5] > 0 ? (unsigned int)cr0[2] : 0u,
              HaveF2KcTrace && F2KcTrace[5] > 0 ? (unsigned int)cr0[3] : 0xffu,
              HaveF2KcTrace && F2KcTrace[5] > 0 ? c0in : "n/a",
              HaveF2KcTrace && F2KcTrace[5] > 0 ? c0out : "n/a",
-             HaveF2KcTrace && F2KcTrace[5] > 1 ? (unsigned int)cr1[0] : 0u,
-             HaveF2KcTrace && F2KcTrace[5] > 1 ? (unsigned int)cr1[1] : 0u,
-             HaveF2KcTrace && F2KcTrace[5] > 1 ? (unsigned int)cr1[2] : 0u,
-             HaveF2KcTrace && F2KcTrace[5] > 1 ? (unsigned int)cr1[3] : 0xffu,
+             HaveF2KcTrace && F2KcTrace[5] > 1 ? (unsigned int)cr1r[0] : 0u,
+             HaveF2KcTrace && F2KcTrace[5] > 1 ? (unsigned int)cr1r[1] : 0u,
+             HaveF2KcTrace && F2KcTrace[5] > 1 ? (unsigned int)cr1r[2] : 0u,
+             HaveF2KcTrace && F2KcTrace[5] > 1 ? (unsigned int)cr1r[3] : 0xffu,
              HaveF2KcTrace && F2KcTrace[5] > 1 ? c1in : "n/a",
              HaveF2KcTrace && F2KcTrace[5] > 1 ? c1out : "n/a",
-             HaveFinalKc ? final_kc_hex : "not captured",
-             HaveIcvps2 ? icv_hex : "not captured");
+             HaveFinalKc ? final_kc_hex : "n/a", HaveIcvps2 ? icv_hex : "n/a");
 
     snprintf(path, sizeof(path), "%s/secr-trace.txt", run_dir);
+    rc = write_whole_file(path, text, (unsigned int)strlen(text));
+    if (rc < 0 && first_error == 0)
+        first_error = rc;
+
+    snprintf(text, sizeof(text), "auth_trace_present=%s\n", HaveAuthTrace ? "true" : "false");
+    snprintf(path, sizeof(path), "%s/auth-trace-status.txt", run_dir);
     rc = write_whole_file(path, text, (unsigned int)strlen(text));
     if (rc < 0 && first_error == 0)
         first_error = rc;
@@ -270,7 +315,6 @@ int __wrap_sceSifBindRpc(SifRpcClientData_t *cd, int sid, int mode)
         else if ((unsigned int)sid == SECRSIF_DOWNLOAD_GET_ICVPS2)
             IcvClient = cd;
     }
-
     return rc;
 }
 
@@ -282,29 +326,23 @@ int __wrap_sceSifCallRpc(SifRpcClientData_t *cd, int fno, int mode,
 
     if (fno == 1 && send != NULL) {
         if (cd == HeaderClient) {
-            struct SecrSifDownloadHeaderParams *param;
-            param = (struct SecrSifDownloadHeaderParams *)send;
+            struct SecrSifDownloadHeaderParams *param = (struct SecrSifDownloadHeaderParams *)send;
             param->port = physical_secr_port(param->port);
         } else if (cd == KbitClient) {
-            struct SecrSifDownloadGetKbitParams *param;
-            param = (struct SecrSifDownloadGetKbitParams *)send;
+            struct SecrSifDownloadGetKbitParams *param = (struct SecrSifDownloadGetKbitParams *)send;
             param->port = physical_secr_port(param->port);
         } else if (cd == KcClient) {
-            struct SecrSifDownloadGetKcParams *param;
-            param = (struct SecrSifDownloadGetKcParams *)send;
+            struct SecrSifDownloadGetKcParams *param = (struct SecrSifDownloadGetKcParams *)send;
             param->port = physical_secr_port(param->port);
         }
     }
 
-    rc = __real_sceSifCallRpc(cd, fno, mode, send, ssize,
-                              receive, rsize, endfunc, efarg);
+    rc = __real_sceSifCallRpc(cd, fno, mode, send, ssize, receive, rsize, endfunc, efarg);
 
     if (rc >= 0 && fno == 1 && receive != NULL) {
         if (cd == KbitClient) {
-            struct SecrSifDownloadGetKbitParams *param;
+            struct SecrSifDownloadGetKbitParams *param = (struct SecrSifDownloadGetKbitParams *)receive;
             const unsigned char *trace = (const unsigned char *)receive + SECR_F2_TRACE_RPC_OFFSET;
-            param = (struct SecrSifDownloadGetKbitParams *)receive;
-
             if (f2_trace_valid(trace, 'K')) {
                 memcpy(F2KbitTrace, trace, F2_TRACE_SIZE);
                 HaveF2KbitTrace = 1;
@@ -318,10 +356,8 @@ int __wrap_sceSifCallRpc(SifRpcClientData_t *cd, int fno, int mode,
                 HaveFinalKbit = 1;
             }
         } else if (cd == KcClient) {
-            struct SecrSifDownloadGetKcParams *param;
+            struct SecrSifDownloadGetKcParams *param = (struct SecrSifDownloadGetKcParams *)receive;
             const unsigned char *trace = (const unsigned char *)receive + SECR_F2_TRACE_RPC_OFFSET;
-            param = (struct SecrSifDownloadGetKcParams *)receive;
-
             if (f2_trace_valid(trace, 'C')) {
                 memcpy(F2KcTrace, trace, F2_TRACE_SIZE);
                 HaveF2KcTrace = 1;
@@ -335,14 +371,17 @@ int __wrap_sceSifCallRpc(SifRpcClientData_t *cd, int fno, int mode,
                 HaveFinalKc = 1;
             }
         } else if (cd == IcvClient) {
-            struct SecrSifDownloadGetIcvps2Params *param;
-            param = (struct SecrSifDownloadGetIcvps2Params *)receive;
+            struct SecrSifDownloadGetIcvps2Params *param = (struct SecrSifDownloadGetIcvps2Params *)receive;
+            const unsigned char *auth = (const unsigned char *)receive + SECR_AUTH_TRACE_RPC_OFFSET;
             if (param->result != 0) {
                 memcpy(Icvps2, param->icvps2, 8);
                 HaveIcvps2 = 1;
+                if (auth_trace_valid(auth)) {
+                    memcpy(AuthTrace, auth, AUTH_TRACE_SIZE);
+                    HaveAuthTrace = 1;
+                }
             }
         }
     }
-
     return rc;
 }
