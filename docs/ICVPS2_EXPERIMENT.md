@@ -85,6 +85,32 @@ This result rules out the physical mc0/mc1 port as a determinant of the final ca
 
 No MechaCon NVRAM/EEPROM writes are part of this protocol.
 
+## dev.7 / dev.10 session-wrapped key result
+
+One-pass instrumentation around `scePreEncryptKbit`, `scePreEncryptKc` and the stock `card_encrypt()` path establishes where the cold-boot variability appears.
+
+Across repeated runs with a byte-identical Candidate A and the same Sony 8 MB card:
+
+- the raw values returned by MechaCon `0x94/0x95` and `0x96/0x97` change between cold boots;
+- the final card-wrapped Kbit/Kc remain stable for the physical card;
+- the normal `0x98` ICVPS2 value also changes between transactions;
+- dev.10 records all four stock `F2/50 -> F2/51 -> F2/52 -> F2/53` transforms as successful (`mask=0x0f`), without replaying or adding any card command;
+- the three dev.10 runs in this dataset used logical `mc1`, producing physical SECR/SIO2 port 3, and retained the same final card-wrapped key material previously observed for this card.
+
+The processed 136-byte headers from the dev.10 series differ from one another only at offsets `0x80..0x87`, the ICVPS2 slot. Kbit/Kc in the processed header are otherwise identical across the runs.
+
+Public `ps3mca_tool` source provides the matching algorithmic model: after the disk KELF content key is decrypted, each 8-byte Kbit/Kc half is encrypted with single DES under the current MagicGate session key before being sent for card-side binding. Candidate A decrypts to four identical 8-byte plaintext content-key blocks, which explains why all four `0x94..0x97` pre-key values within a given run are identical. The observed cold-boot variation is therefore consistent with a changing session key, while the card-side F2 binding converts those session-wrapped inputs into stable card-bound output for the same physical card.
+
+This is stronger than merely observing changing ICVPS2: it locates session-dependent variability before the card-side F2 transform. The next controlled vector should use deliberately distinct plaintext Kbit/Kc halves so that one transaction yields four independent input/output equations under one session instead of repeating the same block four times.
+
+## dev.8 / dev.9 negative-state experiments
+
+Attempts to force or explicitly trigger a fresh full memory-card authentication before the KELF transaction changed the state being measured and were therefore abandoned.
+
+Dev.8 inserted a second `SecrAuthCard()` immediately before `SecrDownloadHeader`; the transaction then failed before normal KELF processing. Dev.9 instead triggered `mcGetInfo/mcSync`, but current MCMAN returned `sceMcResFailResetAuth (-11)` from its auth-reset path before the KELF transaction. Current PS2SDK implements that reset using the card-side `F3` command.
+
+A warm return to Browser after the dev.9 failure also caused an FMCB-bearing card to remain filesystem-visible while FMCB was not detected. At that point the probe's custom IOP security stack was still resident because the old Browser-return path called `ExecOSD` without restoring the ROM IOP environment. Dev.10 fixes this confounder by resetting the IOP before `ExecOSD`. No claim of persistent card-data modification is made from the warm-boot observation.
+
 ## Historical note
 
 Older FreeMcBoot code already contains a direct SCMD `0x98` ICVPS2 read path and describes the result as eight bytes, but its source comments state that no known encrypted file used the field at the time. Current PS2SDK preserves the same operation. The present experiment therefore does not claim discovery of the command itself; its contribution is a reproducible ICV-enabled KELF layout and controlled retail-hardware captures.
