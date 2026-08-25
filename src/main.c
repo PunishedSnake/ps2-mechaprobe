@@ -86,9 +86,9 @@ static void run_probe(int memory_card_port, probe_mode_t mode)
     const char *detail;
 
     if (mode == PROBE_MODE_NATIVE_CONTROL) {
-        detail = "dev.11 preserves dev.10 exactly: no mcGetInfo/F3, no explicit SecrAuthCard and no replay. It passively records F2/50-53 and reports the last natural successful SecrAuthCard only if one occurred after instrumented SECRMAN loaded.";
+        detail = "dev.12 preserves dev.11 exactly and adds only passive SecrAuthCard call/success counters inside reserved raw F2-trace bytes. No auth, reset or protocol command is injected.";
     } else if (mode == PROBE_MODE_NATIVE_ICV_READ) {
-        detail = "Legacy forced ICV comparison. Do not use for the controlled dev.11 session experiment.";
+        detail = "Legacy forced ICV comparison. Do not use for the controlled dev.12 session experiment.";
     } else {
         detail = "Forced-flag replay: historical RUN0001 reproduction only.";
     }
@@ -110,13 +110,14 @@ static void run_probe(int memory_card_port, probe_mode_t mode)
 static void show_experiment_notes(void)
 {
     ui_message(
-        "Experiment protocol", "dev.11 | passive natural-auth observation",
-        "The native KELF/F2 transaction order is unchanged from hardware-successful dev.10.\n\n"
-        "Instrumented SECRMAN remembers a naturally occurring successful full\n"
-        "SecrAuthCard only if the normal stack performs one after module load.\n"
-        "The probe never requests or resets that auth.\n\n"
-        "auth-trace-status.txt explicitly says whether such a transcript was\n"
-        "observed. A clean 'false' is a useful result, not a probe failure.\n\n"
+        "Experiment protocol", "dev.12 | passive SecrAuthCard call counter",
+        "The native Candidate-C/F2 transaction remains unchanged from dev.11.\n\n"
+        "dev.11 proved that no successful full SecrAuthCard transcript was seen\n"
+        "in the post-reset instrumented window. dev.12 additionally counts every\n"
+        "SecrAuthCard function entry and successful completion, without calling\n"
+        "or resetting auth itself.\n\n"
+        "Counters are stored only in reserved bytes of raw f2-*-trace.bin so the\n"
+        "existing RPC and visible F2 record layout are not changed.\n\n"
         "Return to Browser still restores the ROM IOP environment first.",
         "X Return", UI_TONE_INFO);
     ui_wait_cross();
@@ -125,13 +126,13 @@ static void show_experiment_notes(void)
 int main(void)
 {
     static const ui_menu_item_t menu[] = {
-        {"Native F2+auth trace - mc0", "Normal KELF path; passive F2 and natural-auth observation", 1},
-        {"Native F2+auth trace - mc1", "Same experiment through memory-card port 1", 1},
+        {"Native F2+auth count - mc0", "Normal KELF path; passive F2 plus SecrAuthCard call counting", 1},
+        {"Native F2+auth count - mc1", "Same experiment through memory-card port 1", 1},
         {"Native + one ICV read - mc0", "Legacy forced-read comparison", 1},
         {"Native + one ICV read - mc1", "Legacy forced-read comparison on mc1", 1},
         {"Forced ICV flag replay - mc0", "Historical RUN0001 reproduction only", 1},
         {"Console / MechaCon info", "ROMVER, raw model response, sceCdMV and RTC evidence", 1},
-        {"Experiment protocol", "dev.11 passive-auth and safe-exit notes", 1},
+        {"Experiment protocol", "dev.12 passive auth-call counting notes", 1},
         {"Return to PS2 Browser", "Restore ROM IOP state, then leave through ExecOSD", 1}
     };
     unsigned int selection = 0;
@@ -177,7 +178,7 @@ int main(void)
     for (;;) {
         int choice = ui_menu_select(
             "DriveForge Mecha Probe",
-            "dev.11 | passive F2 + natural-auth trace",
+            "dev.12 | passive auth-call counter + F2 trace",
             menu, sizeof(menu) / sizeof(menu[0]), &selection);
 
         if (choice < 0 || choice == 7) {
