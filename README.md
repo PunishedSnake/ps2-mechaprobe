@@ -214,3 +214,12 @@ make release
 CI uses `ps2dev/ps2dev:v2.0.0` and an explicitly pinned PS2SDK security revision for the instrumented backend.
 
 PCSX2 is useful for correctness/inspection, but state claims in this project are considered final only after real-hardware reproduction.
+
+## Offline MechaCon/MagicGate keystore input verification
+
+A locally supplied four-file set (`civ.bin`, `cks.bin`, `eks.bin`, `kek.bin`) has been **byte-identity verified** against published MagicGate reference checksums. This is static keystore material, **not** an observed live SessionKey nor a solved ICVPS2 algorithm.
+
+- [Verified keystore input metadata and boundaries](docs/MAGICGATE_KEYSTORE_INPUTS.md)
+- [Offline file verifier](tools/verify_mechacon_keystore.py)
+
+**Do not commit raw key files or derived plaintext key material.** The linked documentation records sizes and digests only and explains the next offline/hardware validation steps.
