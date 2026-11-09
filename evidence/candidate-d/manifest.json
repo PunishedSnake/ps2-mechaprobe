@@ -1,0 +1,125 @@
+{
+  "schema": "ps2-mechaprobe/candidate-d-hardware-v1",
+  "source_archive": {
+    "name": "3cardtest.zip",
+    "size": 244387,
+    "sha256": "ff631ec44bb62b6759310b6e35a3c70ae1059e8bfea88ed078613d6471ae0801"
+  },
+  "probe": {
+    "version": "0.1.0-dev.10",
+    "mode": "native_control",
+    "security_commit": "a13b5971ec0e39c7ba8b8559b80a4e81c8425352"
+  },
+  "console": {
+    "operator_model": "SCPH-50000",
+    "romver": "0170JC20030206",
+    "mechacon_raw": "050100ff",
+    "mechacon_version": "05.01",
+    "region": "Japan",
+    "system_type": "PS2"
+  },
+  "candidate": {
+    "name": "Candidate D",
+    "purpose": "A/B/A/B repeated-plaintext position-state discrimination",
+    "sha256": "437ab24cf29476d372071af60b9de0d86ae15d8f67fc0ee4061c19fa46b50670",
+    "size": 78744,
+    "flags": "0x022e",
+    "header_size": 136,
+    "plaintext_A": "0123456789abcdef",
+    "plaintext_B": "fedcba9876543210",
+    "plaintext_kbit": "0123456789abcdeffedcba9876543210",
+    "plaintext_kc": "0123456789abcdeffedcba9876543210",
+    "header_signature": "84c3ebbfcf59eb2b",
+    "bit_signature": "22a235f5a3ad7123",
+    "root_signature": "6e45eb67f7446ad0",
+    "block0_signature": "517193d4c6b693ea",
+    "plaintext_payload_sha256": "d7922c6eb6cce23c05808a77ffe0c2c58758414d707da4aebd85a7fabec9d69d"
+  },
+  "returned_bit_sha256": "600486e0f71109358b650c05adbfa974bd71bf00055291b7475628b68265d89e",
+  "runs": [
+    {
+      "run": "RUN0001",
+      "card": "8MB-MG-SONY-2",
+      "card_identity_basis": "Candidate-C B vector b559bdac76c898b0",
+      "logical_port": 0,
+      "physical_secr_port": 2,
+      "slot": 0,
+      "rtc": "2026-08-26T02:20:48",
+      "status": "success",
+      "code": 0,
+      "pre_kbit": "716338e2428c50b84dd40f4c6b78843f",
+      "pre_kc": "716338e2428c50b84dd40f4c6b78843f",
+      "final_kbit": "890b39b28786304cb559bdac76c898b0",
+      "final_kc": "890b39b28786304cb559bdac76c898b0",
+      "icvps2": "6b156fd975d01290",
+      "processed_header_sha256": "a1b0a9813f55b1492fa3223ffc387514d24fa54e25cdbd2fe332fc49adfe4051",
+      "f2": [
+        {"position": "kbit0", "plaintext": "0123456789abcdef", "input": "716338e2428c50b8", "output": "890b39b28786304c", "mask": "0x0f", "failed": "0x00"},
+        {"position": "kbit1", "plaintext": "fedcba9876543210", "input": "4dd40f4c6b78843f", "output": "b559bdac76c898b0", "mask": "0x0f", "failed": "0x00"},
+        {"position": "kc0", "plaintext": "0123456789abcdef", "input": "716338e2428c50b8", "output": "890b39b28786304c", "mask": "0x0f", "failed": "0x00"},
+        {"position": "kc1", "plaintext": "fedcba9876543210", "input": "4dd40f4c6b78843f", "output": "b559bdac76c898b0", "mask": "0x0f", "failed": "0x00"}
+      ]
+    },
+    {
+      "run": "RUN0002",
+      "card": "8MB-MG-SONY-1",
+      "card_identity_basis": "Candidate-C B vector 111b7019b53114c3",
+      "logical_port": 1,
+      "physical_secr_port": 3,
+      "slot": 0,
+      "rtc": "2026-08-26T02:21:38",
+      "status": "success",
+      "code": 0,
+      "pre_kbit": "3da99d5782e7be586fcaaad36d22521a",
+      "pre_kc": "3da99d5782e7be586fcaaad36d22521a",
+      "final_kbit": "1b0d96b2404d2a10111b7019b53114c3",
+      "final_kc": "1b0d96b2404d2a10111b7019b53114c3",
+      "icvps2": "686b1683e8f2f73c",
+      "processed_header_sha256": "e8a16f02547854a9b4ddb032bb7b9fda7d0944b67fc2dead7f51492ab9d9c7fa",
+      "f2": [
+        {"position": "kbit0", "plaintext": "0123456789abcdef", "input": "3da99d5782e7be58", "output": "1b0d96b2404d2a10", "mask": "0x0f", "failed": "0x00"},
+        {"position": "kbit1", "plaintext": "fedcba9876543210", "input": "6fcaaad36d22521a", "output": "111b7019b53114c3", "mask": "0x0f", "failed": "0x00"},
+        {"position": "kc0", "plaintext": "0123456789abcdef", "input": "3da99d5782e7be58", "output": "1b0d96b2404d2a10", "mask": "0x0f", "failed": "0x00"},
+        {"position": "kc1", "plaintext": "fedcba9876543210", "input": "6fcaaad36d22521a", "output": "111b7019b53114c3", "mask": "0x0f", "failed": "0x00"}
+      ]
+    },
+    {
+      "run": "RUN0003",
+      "card": "64MB-MG-NOTSONY",
+      "card_identity_basis": "Candidate-A/C qualitative position-dependent F2 behavior",
+      "logical_port": 1,
+      "physical_secr_port": 3,
+      "slot": 0,
+      "rtc": "2026-08-26T02:22:47",
+      "status": "success",
+      "code": 0,
+      "pre_kbit": "3cfefcaf0eef59cbf1f36053fdd6910c",
+      "pre_kc": "3cfefcaf0eef59cbf1f36053fdd6910c",
+      "final_kbit": "14e38596a80cbac3602b62fd8b6edf57",
+      "final_kc": "52ce42d5a1b1570a6c844a79b9127a96",
+      "icvps2": "dee682e3e7d2806e",
+      "processed_header_sha256": "31e3dc6c809bc585c19a414057cc93f1c04380f21114d650fe3bc59e56f3d84f",
+      "f2": [
+        {"position": "kbit0", "plaintext": "0123456789abcdef", "input": "3cfefcaf0eef59cb", "output": "14e38596a80cbac3", "mask": "0x0f", "failed": "0x00"},
+        {"position": "kbit1", "plaintext": "fedcba9876543210", "input": "f1f36053fdd6910c", "output": "602b62fd8b6edf57", "mask": "0x0f", "failed": "0x00"},
+        {"position": "kc0", "plaintext": "0123456789abcdef", "input": "3cfefcaf0eef59cb", "output": "52ce42d5a1b1570a", "mask": "0x0f", "failed": "0x00"},
+        {"position": "kc1", "plaintext": "fedcba9876543210", "input": "f1f36053fdd6910c", "output": "6c844a79b9127a96", "mask": "0x0f", "failed": "0x00"}
+      ]
+    }
+  ],
+  "confirmed": [
+    "All three Candidate-D KELF transactions completed successfully on real hardware.",
+    "Both Sony cards map repeated byte-identical F2 inputs to repeated byte-identical outputs across Kbit/Kc positions.",
+    "For plaintext fedcba9876543210 both Sony cards exactly reproduce their Candidate-C outputs across a new KELF position and session.",
+    "The NONSONY card maps byte-identical repeated F2 inputs to different outputs within one transaction.",
+    "The NONSONY divergence is introduced at or behind the card-side F2 boundary and requires hidden state/context beyond the supplied 8-byte input.",
+    "Pairwise processed-header semantic differences remain confined to Kbit/Kc 0x28..0x47 and ICVPS2 0x80..0x87."
+  ],
+  "not_yet_distinguished": [
+    "fixed position-specific transform/key/IV",
+    "state carried between F2 operations",
+    "context established by preceding MagicGate commands",
+    "other deterministic implementation-specific card behavior"
+  ],
+  "next_test_hypothesis": "Complement Candidate D with a B/A/B/A KELF so A and B are sampled across all four Kbit/Kc positions; keep the independent dev.11 passive-auth experiment separate."
+}

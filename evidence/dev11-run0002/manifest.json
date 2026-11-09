@@ -1,0 +1,93 @@
+{
+  "schema": "ps2-mechaprobe/dev11-passive-auth-v1",
+  "source_archive": {
+    "name": "RUN0002.zip",
+    "size": 82117,
+    "sha256": "835b498b4135b93310acf480dedfba6e454daf6239b0a2b9add97e53f16eb40a"
+  },
+  "probe": {
+    "version": "0.1.0-dev.11",
+    "mode": "native_control",
+    "status": "success",
+    "stage": "complete",
+    "code": 0,
+    "logical_port": 0,
+    "physical_secr_port": 2,
+    "slot": 0
+  },
+  "console": {
+    "romver": "0170JC20030206",
+    "mechacon_raw": "050100ff",
+    "mechacon_version": "05.01",
+    "region": "Japan",
+    "system_type": "PS2",
+    "rtc": "2026-08-26T03:58:14"
+  },
+  "candidate": {
+    "name": "Candidate C",
+    "sha256": "87de11f092965122ea01bd6e3a908f5876cca0a42aaa49037bd63a39066d056d",
+    "size": 78744,
+    "flags": "0x022e",
+    "header_size": 136,
+    "uses_icvps2": true,
+    "plaintext_blocks": [
+      "0011223344556677",
+      "8899aabbccddeeff",
+      "fedcba9876543210",
+      "0f1e2d3c4b5a6978"
+    ]
+  },
+  "auth_trace": {
+    "present": false,
+    "status_file_sha256": "31febe9780bc861375a210bfee59714510e51075f5d068bc294ffdb6420372b5"
+  },
+  "returned_bit_sha256": "600486e0f71109358b650c05adbfa974bd71bf00055291b7475628b68265d89e",
+  "pre_kbit": "9f723ca2b3b6526a08f9683c3e70250f",
+  "pre_kc": "3013911614de07dd63881a6a67786e1e",
+  "final_kbit": "4acf09a5ec5d10d40589da87b42f05f5",
+  "final_kc": "b559bdac76c898b053e0c7cabbd8797b",
+  "icvps2": "782941f0adbe687d",
+  "processed_header_sha256": "3e67b8b0f28765fa739528363d5eef6df2cd350008d826aa70323ff9b6177fcf",
+  "f2": [
+    {
+      "position": "kbit0",
+      "plaintext": "0011223344556677",
+      "input": "9f723ca2b3b6526a",
+      "output": "4acf09a5ec5d10d4",
+      "mask": "0x0f",
+      "failed": "0x00"
+    },
+    {
+      "position": "kbit1",
+      "plaintext": "8899aabbccddeeff",
+      "input": "08f9683c3e70250f",
+      "output": "0589da87b42f05f5",
+      "mask": "0x0f",
+      "failed": "0x00"
+    },
+    {
+      "position": "kc0",
+      "plaintext": "fedcba9876543210",
+      "input": "3013911614de07dd",
+      "output": "b559bdac76c898b0",
+      "mask": "0x0f",
+      "failed": "0x00"
+    },
+    {
+      "position": "kc1",
+      "plaintext": "0f1e2d3c4b5a6978",
+      "input": "63881a6a67786e1e",
+      "output": "53e0c7cabbd8797b",
+      "mask": "0x0f",
+      "failed": "0x00"
+    }
+  ],
+  "confirmed": [
+    "No successful full SecrAuthCard was observed after the dev.11 instrumented SECRMAN loaded.",
+    "Candidate C nevertheless completed the normal Header/Block/Kbit/Kc/ICVPS2 transaction successfully.",
+    "All four F2 operations completed with mask 0x0f and failed 0x00.",
+    "The final Kbit/Kc exactly reproduce the established SONY-2 Candidate-C card-bound vector.",
+    "The ICV value agrees between probe.json, icvps2.bin and icvps2-trace.bin."
+  ],
+  "inference": "The active session/auth state consumed by 0x94..0x98 predates the dev.11 instrumented post-reset IOP window and survives the probe's IOP reset/module replacement; the exact earlier creator and storage location remain unproven."
+}
